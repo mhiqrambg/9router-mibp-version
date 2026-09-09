@@ -37,6 +37,9 @@ const PUBLIC_API_PATHS = [
 // Keep root-level rewrites here too: middleware runs before Next.js rewrites.
 const PUBLIC_PREFIXES = ["/v1", "/v1beta", "/api/v1", "/api/v1beta", "/codex", "/responses"];
 
+// Loopback-only API paths (CloakBrowser captcha page has no dashboard session cookie).
+const LOCALHOST_PUBLIC_API_PATHS = ["/api/zcode/captcha"];
+
 // Always require JWT token regardless of requireLogin setting
 const ALWAYS_PROTECTED = [
   "/api/shutdown",
@@ -223,6 +226,10 @@ export async function proxy(request) {
 
   // Deny-by-default for /api/* — public allow-list bypasses, everything else requires auth.
   if (pathname.startsWith("/api/")) {
+    if (LOCALHOST_PUBLIC_API_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`))) {
+      if (isLocalRequest(request)) return NextResponse.next();
+      return NextResponse.json({ error: "Local only: captcha API" }, { status: 403 });
+    }
     if (isPublicApi(pathname)) return NextResponse.next();
     if (await hasValidCliToken(request) || await isAuthenticated(request))
       return NextResponse.next();

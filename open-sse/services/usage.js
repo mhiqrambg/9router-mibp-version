@@ -47,7 +47,7 @@ const USAGE_HANDLERS = {
   },
   iflow: (c) => getIflowUsage(c.accessToken),
   ollama: (c) => getOllamaUsage(c.apiKey, c.providerSpecificData, c.proxyOptions),
-  glm: (c) => getGlmUsage(c.apiKey, c.provider, c.proxyOptions),
+  glm: (c) => getGlmUsage(c, c.proxyOptions),
   "glm-cn": (c) => getGlmUsage(c.apiKey, c.provider, c.proxyOptions),
   minimax: (c) => getMiniMaxUsage(c.apiKey, c.provider, c.proxyOptions),
   "minimax-cn": (c) => getMiniMaxUsage(c.apiKey, c.provider, c.proxyOptions),

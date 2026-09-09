@@ -477,6 +477,25 @@ export function parseQuotaData(provider, data) {
         }
         break;
 
+      case "glm":
+      case "glm-cn":
+        // Z.AI Coding Plan: per-model token buckets from billing/balance.
+        // Do not forward `remaining` — it's an absolute token count, not a percentage.
+        if (data.quotas) {
+          Object.entries(data.quotas).forEach(([name, quota]) => {
+            normalizedQuotas.push({
+              name,
+              modelKey: name.toLowerCase().replace(/\s+/g, "-"),
+              used: quota.used || 0,
+              total: quota.total || 0,
+              resetAt: quota.resetAt || null,
+              remainingPercentage: quota.remainingPercentage,
+              unit: quota.unit || "token",
+            });
+          });
+        }
+        break;
+
       case "codebuddy-cn":
         // CodeBuddy CN mixes recurring refill packs ("Monthly"/"Weekly"/...)
         // with one-shot bonus packs ("Bonus Pack N"). Forward `recurring`
@@ -499,10 +518,13 @@ export function parseQuotaData(provider, data) {
         // Grok Build credits (on-demand window + prepaid balance).
         // Do NOT forward absolute `remaining` — getRemainingPercentage treats
         // it as a 0–100 percentage (same as Qoder). Use remainingPercentage.
+
         if (data.quotas) {
           Object.entries(data.quotas).forEach(([name, quota]) => {
             normalizedQuotas.push({
               name,
+              modelKey: name.toLowerCase().replace(/\s+/g, "-"),
+
               used: quota.used || 0,
               total: quota.total || 0,
               resetAt: quota.resetAt || null,
@@ -601,6 +623,7 @@ export function parseQuotaData(provider, data) {
               resetAt: quota.resetAt || null,
               remainingPercentage: quota.remainingPercentage,
               unlimited: quota.unlimited,
+
             });
           });
         }

@@ -157,8 +157,8 @@ export default function ProviderDetailPage() {
   const isCompatible = isOpenAICompatible || isAnthropicCompatible;
   const hasDualAuthModes = !isCompatible && isOAuth && supportsApiKeyAuth;
   const oauthConnectionLabel =
+<<<<<<< HEAD
     providerId === "xai" ? "Grok Build OAuth"
-    : providerId === "glm" ? "Z.AI OAuth"
     : providerId === "grok-cli" ? "Grok CLI Device Login"
     : providerId === "kimi" ? "Kimi Coding OAuth"
     : "OAuth";
@@ -167,6 +167,18 @@ export default function ProviderDetailPage() {
     : providerId === "kimi" ? "Kimi API Key"
     : providerId === "qoder" ? "PAT"
     : "API Key";
+  // Resolve suffix "(level)" for a model when a thinking level is picked and the model supports it.
+  const resolveThinkingSuffix = (modelId) => {
+    if (!thinkingMode || thinkingMode === "auto") return null;
+    const levels = getThinkingLevels(providerId, modelId);
+    return levels && levels.includes(thinkingMode) ? thinkingMode : null;
+  };
+=======
+    providerId === "xai" ? "Grok Build OAuth" : providerId === "glm" ? "Z.AI OAuth" : "OAuth";
+  const apiKeyConnectionLabel = providerId === "xai" ? "xAI API Key" : "API Key";
+  const thinkingConfig = AI_PROVIDERS[providerId]?.thinkingConfig || THINKING_CONFIG.extended;
+  
+>>>>>>> pr1848-glm-zcode
   const providerStorageAlias = isCompatible ? providerId : providerAlias;
   const assignmentModels = (() => {
     const byId = new Map();
