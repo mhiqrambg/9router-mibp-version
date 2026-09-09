@@ -371,6 +371,13 @@ const MODALITY_KEYS = ["vision", "pdf", "audioInput", "videoInput"];
 
 // Catalog lookups, installed by the server at startup. Left as no-ops in the
 // browser bundle, where there is no file to read.
+//
+// Stored on globalThis, not a module-local: Next.js compiles a separate webpack
+// runtime per server bundle (instrumentation vs each route chunk), so the copy
+// of this module that installCatalogSource() reaches is NOT the copy the route
+// handlers imported. A module-local gets set in one instance and read as null
+// in the other — globalThis is shared across every instance in the process.
+const CATALOG_SOURCE_KEY = "__mibpCatalogSource";
 let catalogSource = null;
 
 /**
@@ -379,6 +386,21 @@ let catalogSource = null;
  */
 export function setCatalogSource(source) {
   catalogSource = source;
+  try {
+    globalThis[CATALOG_SOURCE_KEY] = source;
+  } catch {
+    // No global object (edge runtime sandbox) — module-local still works for
+    // single-instance bundles.
+  }
+}
+
+// Cross-instance read: another bundle's copy may have installed the source.
+function currentCatalogSource() {
+  try {
+    return globalThis[CATALOG_SOURCE_KEY] || catalogSource;
+  } catch {
+    return catalogSource;
+  }
 }
 
 // Apply the synced catalog + name heuristic on top of a table-resolved result.
@@ -386,6 +408,7 @@ export function setCatalogSource(source) {
 // flips when an outside source positively declares support.
 function refine(base, provider, model) {
   const result = { ...DEFAULT_CAPABILITIES, ...base };
+  const catalogSource = currentCatalogSource();
 
   if (catalogSource) {
     const modalities = catalogSource.getModalities(model);
