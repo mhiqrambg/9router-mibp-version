@@ -188,7 +188,11 @@ export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst
   const displayName = isOAuthConnection
     ? (connection.provider === "glm" ? glmOAuthLabel : defaultOAuthLabel)
     : (connection.name || connection.email || connection.displayName || "API Key");
-
+  const secondaryDisplayName = connection.name?.trim() && connection.email?.trim() && connection.name.trim() !== connection.email.trim()
+    ? connection.email.trim()
+    : connection.name?.trim() && connection.displayName?.trim() && connection.name.trim() !== connection.displayName.trim()
+      ? connection.displayName.trim()
+      : null;
 
   // Use useState + useEffect for impure Date.now() to avoid calling during render
   const [isCooldown, setIsCooldown] = useState(false);
