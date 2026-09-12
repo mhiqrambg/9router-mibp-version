@@ -5,6 +5,7 @@ import { GEMINI_CONFIG } from "@/lib/oauth/constants/oauth";
 import { refreshGoogleToken, refreshCodexToken, updateProviderCredentials } from "@/sse/services/tokenRefresh";
 import { resolveOllamaLocalHost } from "open-sse/config/providers.js";
 import { getModelsByProviderId } from "open-sse/config/providerModels.js";
+import { PROVIDERS } from "open-sse/config/providers.js";
 import { resolveKiroModels } from "open-sse/services/kiroModels.js";
 import { resolveKimchiModels } from "open-sse/services/kimchiModels.js";
 import { resolveQoderModels } from "open-sse/services/qoderModels.js";
@@ -368,6 +369,40 @@ const PROVIDER_MODELS_CONFIG = {
       return { models: [], warning };
     },
   },
+  "opencode-zen": {
+    customResolver: async (connection) => {
+      try {
+        const token = connection.apiKey || connection.accessToken || connection.token;
+        const headers = {
+          "User-Agent": "opencode/0.1.48 (linux x64)",
+          "x-opencode-client": "cli",
+          "x-opencode-version": "0.1.48",
+          "originator": "opencode",
+          "Accept": "application/json",
+        };
+        if (token && token !== "public") {
+          headers["Authorization"] = `Bearer ${token}`;
+        }
+        const res = await fetch("https://opencode.ai/zen/v1/models", {
+          headers,
+          cache: "no-store",
+        });
+        if (!res.ok) {
+          return { models: [], warning: `Failed to fetch OpenCode models: HTTP ${res.status}` };
+        }
+        const json = await res.json();
+        const list = json.data || json.models || [];
+        return {
+          models: list.map((m) => ({
+            id: m.id,
+            name: m.name || m.id,
+          })),
+        };
+      } catch (err) {
+        return { models: [], warning: err.message };
+      }
+    },
+  },
   "gemini-cli": {
     customResolver: buildOAuthResolver({
       refreshFn: (conn) => refreshGoogleToken(conn.refreshToken, GEMINI_CONFIG.clientId, GEMINI_CONFIG.clientSecret),
@@ -522,7 +557,16 @@ export async function GET(request, { params }) {
       });
     }
 
-    const config = PROVIDER_MODELS_CONFIG[connection.provider];
+    let config = PROVIDER_MODELS_CONFIG[connection.provider];
+    if (!config) {
+      // Dynamic fallback for any provider with modelsFetcher or validateUrl in registry
+      const reg = PROVIDERS[connection.provider];
+      const fetchUrl = reg?.modelsFetcher?.url || reg?.transport?.validateUrl || reg?.validateUrl;
+      if (fetchUrl) {
+        config = createOpenAIModelsConfig(fetchUrl);
+      }
+    }
+
     if (!config) {
       return NextResponse.json(
         { error: `Provider ${connection.provider} does not support models listing` },

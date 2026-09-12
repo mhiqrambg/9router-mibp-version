@@ -6,7 +6,7 @@ import { injectReasoningContent } from "../utils/reasoningContentInjector.js";
 import { resolveSessionId } from "../utils/sessionManager.js";
 import { isMuseSparkModel } from "../providers/models/helpers.js";
 
-const OPENCODE_UA = "opencode";
+const OPENCODE_UA = "opencode/0.1.48 (linux x64)";
 // Models served by /zen/v1/responses; every other model stays on /chat/completions.
 const RESPONSES_MODELS = new Set([
   "muse-spark-1.2-contributor-free",
@@ -21,7 +21,6 @@ function generateSessionId() {
   return `ses_${crypto.randomUUID().replace(/-/g, "")}`;
 }
 
-// Strip the thinking suffix "model(level)" so registry lookups hit the base id.
 function baseModelId(model) {
   return String(model || "").replace(/\([^()]+\)\s*$/, "").trim();
 }
@@ -65,23 +64,18 @@ function normalizeOpencodeReasoning(model, body) {
   delete body.reasoning_effort;
 }
 
-// OpenCode free tier is limited per egress IP — a 429/403 with a limit-ish
-// body means the POOL's IP is exhausted, not the account. Declare it
-// pool-scoped so chatCore marks the pool unfit, retries via another pool, and
-// it shows up (clearable) on the Proxy Fitness page.
 const IP_LIMIT_BODY = /limit|rate|quota|exhausted|capacity|too many|retry/i;
 
 export class OpenCodeExecutor extends BaseExecutor {
-  constructor() {
-    super("opencode", PROVIDERS.opencode);
+  constructor(providerName = "opencode") {
+    const config = PROVIDERS[providerName] || PROVIDERS.opencode;
+    super(providerName, config);
     this._currentSessionId = null;
   }
 
   transformRequest(model, body, stream, credentials) {
     this._currentSessionId = resolveOpencodeSession(body, credentials);
     if (isResponsesModel(model)) {
-      // Responses API names the output cap max_output_tokens and takes thinking
-      // as reasoning:{effort,summary} — normalize the Chat fields at this boundary.
       if (body.max_output_tokens === undefined) {
         if (body.max_completion_tokens !== undefined) body.max_output_tokens = body.max_completion_tokens;
         else if (body.max_tokens !== undefined) body.max_output_tokens = body.max_tokens;
@@ -94,7 +88,7 @@ export class OpenCodeExecutor extends BaseExecutor {
   }
 
   buildUrl(model) {
-    const base = this.config.baseUrl;
+    const base = this.config?.baseUrl || this.config?.baseUrls?.[0] || "https://opencode.ai";
     return isResponsesModel(model)
       ? `${base}/zen/v1/responses`
       : `${base}/zen/v1/chat/completions`;
@@ -108,11 +102,16 @@ export class OpenCodeExecutor extends BaseExecutor {
     const downstreamUa = lower["user-agent"] || "";
     const isOpencodeDownstream = downstreamUa.toLowerCase().includes("opencode");
 
+    const token = credentials?.apiKey || credentials?.accessToken || credentials?.token || "public";
+    const authHeader = token === "public" ? "Bearer public" : `Bearer ${token}`;
+
     return {
       "Content-Type": "application/json",
-      "Authorization": "Bearer public",
-      "User-Agent": isOpencodeDownstream ? downstreamUa : OPENCODE_UA,
-      "x-opencode-client": lower["x-opencode-client"] || "desktop",
+      "Authorization": authHeader,
+      "User-Agent": isOpencodeDownstream ? downstreamUa : (this.config?.headers?.["User-Agent"] || OPENCODE_UA),
+      "x-opencode-client": lower["x-opencode-client"] || this.config?.headers?.["x-opencode-client"] || "cli",
+      "x-opencode-version": lower["x-opencode-version"] || this.config?.headers?.["x-opencode-version"] || "0.1.48",
+      "originator": lower["originator"] || this.config?.headers?.["originator"] || "opencode",
       "x-opencode-session": lower["x-opencode-session"] || this._currentSessionId || generateSessionId(),
       "x-opencode-request": lower["x-opencode-request"] || generateRequestId(),
       "x-opencode-project": lower["x-opencode-project"] || "global",
@@ -130,6 +129,6 @@ export class OpenCodeExecutor extends BaseExecutor {
         poolScoped: { reason: "ip-limit" },
       };
     }
-    return null; // fall through to default parsing
+    return null;
   }
 }

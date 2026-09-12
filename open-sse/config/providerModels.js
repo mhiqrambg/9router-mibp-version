@@ -50,7 +50,7 @@ export function findModelName(aliasOrId, modelId) {
 }
 
 export function getModelTargetFormat(aliasOrId, modelId) {
-  if ((!aliasOrId || aliasOrId === "oc" || aliasOrId === "opencode") && isMuseSparkModel(modelId)) {
+  if ((!aliasOrId || aliasOrId === "oc" || aliasOrId === "opencode" || aliasOrId === "zen" || aliasOrId === "opencode-zen" || aliasOrId === "oc-zen") && isMuseSparkModel(modelId)) {
     return FORMATS.OPENAI_RESPONSES;
   }
   const models = PROVIDER_MODELS[aliasOrId];
@@ -90,6 +90,9 @@ export function getModelUpstreamId(aliasOrId, modelId) {
   }
   if (aliasOrId === "cx" && typeof baseId === "string" && baseId.endsWith(CODEX_REVIEW_SUFFIX)) {
     return baseId.slice(0, -CODEX_REVIEW_SUFFIX.length) + suffix;
+  }
+  if ((aliasOrId === "Lop" || (typeof aliasOrId === "string" && aliasOrId.includes("fc105859"))) && baseId === "claude-fable-5.1") {
+    return "claude-fable-5" + suffix;
   }
   return baseId + suffix;
 }

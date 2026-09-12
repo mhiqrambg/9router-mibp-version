@@ -122,6 +122,85 @@ const LIVE_MODEL_RESOLVERS = {
         })),
     };
   },
+  "opencode-zen": async (conn) => {
+    try {
+      console.log("[opencode-zen] Live resolver called for conn:", conn.id);
+      const token = conn.apiKey || conn.accessToken || conn.token;
+      const headers = {
+        "User-Agent": "opencode/0.1.48 (linux x64)",
+        "x-opencode-client": "cli",
+        "x-opencode-version": "0.1.48",
+        "originator": "opencode",
+        "Accept": "application/json",
+      };
+      if (token && token !== "public") {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+      const res = await fetch("https://opencode.ai/zen/v1/models", {
+        headers,
+        cache: "no-store",
+      });
+      if (!res.ok) {
+        console.log("[opencode-zen] Fetch failed:", res.status);
+        return null;
+      }
+      const json = await res.json();
+      const list = json.data || json.models || [];
+      if (!Array.isArray(list) || !list.length) return null;
+      console.log("[opencode-zen] Fetched", list.length, "models from upstream");
+      // Filter out GPT & Claude models from upstream
+      const filtered = list.filter((m) => {
+        const id = (m.id || "").toLowerCase();
+        const hasGpt = id.includes("gpt");
+        const hasClaude = id.includes("claude");
+        if (hasGpt || hasClaude) {
+          console.log("[opencode-zen] Filtering out:", m.id, "(gpt:", hasGpt, "claude:", hasClaude, ")");
+        }
+        return !hasGpt && !hasClaude;
+      });
+      console.log("[opencode-zen] Filtered to", filtered.length, "models (removed GPT/Claude)");
+      return {
+        models: filtered.map((m) => ({
+          id: m.id,
+          name: m.name || m.id,
+          capabilities: { tools: true },
+        })),
+      };
+    } catch (err) {
+      console.log("opencode-zen live models fetch error:", err?.message || err);
+      return null;
+    }
+  },
+  opencode: async (conn) => {
+    try {
+      const res = await fetch("https://opencode.ai/zen/v1/models", {
+        headers: {
+          "User-Agent": "opencode",
+          "x-opencode-client": "desktop",
+          "Accept": "application/json",
+        },
+        cache: "no-store",
+      });
+      if (!res.ok) return null;
+      const json = await res.json();
+      const list = json.data || json.models || [];
+      if (!Array.isArray(list) || !list.length) return null;
+      // Filter out GPT & Claude models from upstream
+      const filtered = list.filter((m) => {
+        const id = (m.id || "").toLowerCase();
+        return !id.includes("gpt") && !id.includes("claude");
+      });
+      return {
+        models: filtered.map((m) => ({
+          id: m.id,
+          name: m.name || m.id,
+          capabilities: { tools: true },
+        })),
+      };
+    } catch {
+      return null;
+    }
+  },
 };
 
 const parseOpenAIStyleModels = (data) => {
