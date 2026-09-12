@@ -40,6 +40,18 @@ const SESSION_DEFAULT_TTL_MS = 60 * 60 * 1000; // active sessions live ~1h
 // before retrying (mirrors the CLI's FreebuffGateErrorKind statuses).
 const SESSION_STALE_CODES = new Set([428, 409, 410]);
 
+// Models the backend runs as a CAPACITY-LIMITED OFFER rather than a standing
+// picker row. Claude Fable 5 is not in the client catalog at all: the server
+// advertises it per-session-response (`limitedModelOffers`) only while its
+// shared wave pool has sessions left, and a request without a live offer is
+// refused. A claim must therefore peek at the current offers first instead of
+// POSTing blind (mirrors the CLI: the "Claude Fable 5 · N of M left" row only
+// renders from that payload). Offer state is per-account and cached briefly —
+// the pool can reopen at any time, so a closed offer must NOT set a long
+// cooldown.
+const OFFER_GATED_MODELS = new Set(["anthropic/claude-fable-5"]);
+const OFFER_CACHE_TTL_MS = 45_000;
+
 // The free tier rejects requests whose first system message doesn't open with
 // the canonical Freebuff CLI root prompt (server gate
 // requestHasFreebuffSystemMarker → 403 free_mode_cli_required). The check is a
@@ -103,12 +115,22 @@ function injectEndTurnTool(body) {
 // FREEBUFF_CLI_BASE3_AGENT_ID_BY_MODEL — the CLI harness moved from base2 to
 // base3, and the backend can return 404 "No endpoints found" for the old
 // base2 roots during the transition).
+//
+// Withdrawn upstream models (deepseek-v4-pro, minimax-m3, stealth/ox-alpha,
+// google/gemini-3.8-flash, meta/muse-spark-1.3-contributor) are deliberately
+// absent: no new session can be admitted on them, so mapping them would only
+// hide a dead pick behind a wrong root. z-ai/glm-5.2 stays mapped
+// (referral-earned accounts can still run it) even though it is not a
+// standing picker row.
 const FREE_ROOT_AGENT_BY_MODEL = {
   "deepseek/deepseek-v4-flash": "base3-free-deepseek-flash",
-  "deepseek/deepseek-v4-pro": "base3-free-deepseek",
+  "z-ai/glm-5.2": "base3-free-glm",
+  "z-ai/glm-5.3-flash": "base3-free-glm-5-3-flash",
   "mimo/mimo-v2.5": "base3-free-mimo",
-  "minimax/minimax-m3": "base3-free-minimax-m3",
   "openai/gpt-5.6-luna": "base3-free-luna",
+  "upstage/solar-pro4": "base3-free-solar-pro4",
+  "meta/muse-spark-1.2-contributor": "base3-free-muse-spark",
+  "anthropic/claude-fable-5": "base3-free-fable",
 };
 
 // Per-token+model session cache (in-memory; keyed so multi-account setups
@@ -122,11 +144,13 @@ const fbState = (globalThis[FB_STATE_KEY] ??= {
   inflight: new Map(),          // dedupe concurrent claims for the same key
   modelLockCooldowns: new Map(), // `${token}::${model}` -> expiresAt (ms)
   poolLimitCooldowns: new Map(), // `${proxyKey}::${model}` -> expiresAt (ms)
+  offerCache: new Map(),        // `${token}` -> { fetchedAt, offers: [] } (limited-offer rows)
 });
 const sessionCache = fbState.sessionCache;
 const inflight = fbState.inflight;
 const modelLockCooldowns = fbState.modelLockCooldowns;
 const poolLimitCooldowns = fbState.poolLimitCooldowns;
+const offerCache = fbState.offerCache;
 
 const MODEL_LOCK_COOLDOWN_MS = 10 * 60 * 1000; // session bound to another model (~1h) — re-check every 10 min
 const POOL_LIMITED_COOLDOWN_MS = 5 * 60 * 1000; // IP tier refuses this model — try a different pool/relay
@@ -256,6 +280,10 @@ async function fetchWithNetworkRetry(url, options, proxyOptions, attempts = 3, t
 }
 
 async function requestSession(token, model, proxyOptions) {
+  // Offer-gated models (Fable) refuse claims while their wave pool is closed —
+  // checked before the POST so a closed offer never burns a claim attempt.
+  await guardOfferClaim(token, model, proxyOptions);
+
   const response = await fetchWithNetworkRetry(`${sessionOrigin()}${SESSION_PATH}`, {
     method: "POST",
     headers: {
@@ -274,13 +302,50 @@ async function requestSession(token, model, proxyOptions) {
     err.status = 401;
     throw err;
   }
+  const status = data?.status;
+  const GATE_MESSAGES = {
+    country_blocked: "Freebuff is not available in your region (country blocked).",
+    banned: "Your Freebuff account has been banned.",
+    ip_capped: "Freebuff IP cap reached — try again later.",
+    rate_limited: "Freebuff session limit reached for this model — try again later.",
+    spend_limited: "Freebuff spend limit reached — add credits or wait for the window to reset.",
+    model_locked: "Freebuff session is locked to another model — end it in the CLI or wait for it to expire.",
+    model_unavailable: "This model is not available on Freebuff right now.",
+    premium_slot_taken: "Freebuff premium slot is taken — try another model.",
+  };
+  // Gate statuses ride BOTH 200 (pre-join refusals) and 4xx — the backend
+  // sends spend_limited/rate_limited as HTTP 429 with the gate in the body.
+  // Handle them BEFORE the generic !response.ok throw so exhaustion carries
+  // resetsAtMs (skip-until-reset) instead of a bare status.
+  if (GATE_MESSAGES[status]) {
+    const err = new Error(data?.message ? `${GATE_MESSAGES[status]} ${data.message}` : GATE_MESSAGES[status]);
+    // Freebucks / session-allowance exhaustion is a hard stop until the daily
+    // Pacific reset — mark the account unavailable until then so accountFallback
+    // SKIPS it for the rest of the day instead of retrying every 30s and getting
+    // refused repeatedly. resetsAtMs is honored by markAccountUnavailable;
+    // freebuff bypasses the generic 30-min cap (see auth.js).
+    if (status === "rate_limited" || status === "spend_limited") {
+      const resetAtMs = Date.parse(data?.resetAt || "");
+      if (Number.isFinite(resetAtMs) && resetAtMs > Date.now()) {
+        err.resetsAtMs = resetAtMs;
+        err.status = 429;
+      } else {
+        const retryAfterMs = Number(data?.retryAfterMs);
+        if (Number.isFinite(retryAfterMs) && retryAfterMs > 0) {
+          err.resetsAtMs = Date.now() + retryAfterMs;
+          err.status = 429;
+        }
+      }
+    }
+    throw err;
+  }
+
   if (!response.ok) {
     const err = new Error(`Freebuff session request failed: ${response.status} ${JSON.stringify(data).slice(0, 200)}`);
     err.status = response.status;
     throw err;
   }
 
-  const status = data?.status;
   if (status === "active") {
     const parsedExp = Date.parse(data.expiresAt || "");
     const entry = {
@@ -296,21 +361,79 @@ async function requestSession(token, model, proxyOptions) {
     return { instanceId: null, status: "none" };
   }
 
-  const GATE_MESSAGES = {
-    country_blocked: "Freebuff is not available in your region (country blocked).",
-    banned: "Your Freebuff account has been banned.",
-    ip_capped: "Freebuff IP cap reached — try again later.",
-    rate_limited: "Freebuff session limit reached for this model — try again later.",
-    spend_limited: "Freebuff spend limit reached — add credits or wait for the window to reset.",
-    model_locked: "Freebuff session is locked to another model — end it in the CLI or wait for it to expire.",
-    model_unavailable: "This model is not available on Freebuff right now.",
-    premium_slot_taken: "Freebuff premium slot is taken — try another model.",
-  };
-  if (GATE_MESSAGES[status]) {
-    const message = data?.message ? `${GATE_MESSAGES[status]} ${data.message}` : GATE_MESSAGES[status];
-    throw new Error(message);
-  }
   throw new Error(`Freebuff session rejected (${status || response.status}): ${JSON.stringify(data).slice(0, 200)}`);
+}
+
+// Fetch the account's current limited-model offers (GET — never claims).
+// Cached per token for OFFER_CACHE_TTL_MS: the wave pool changes on server
+// time, not ours, and a claim only needs to know "is it open right now".
+async function fetchSessionOffers(token, proxyOptions) {
+  const now = Date.now();
+  const cached = offerCache.get(token);
+  if (cached && now - cached.fetchedAt < OFFER_CACHE_TTL_MS) {
+    return cached.offers;
+  }
+
+  const response = await fetchWithNetworkRetry(`${sessionOrigin()}${SESSION_PATH}`, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "User-Agent": "codebuff-cli/0.0.138",
+      Accept: "application/json",
+    },
+  }, proxyOptions);
+
+  let data = {};
+  try { data = await response.json(); } catch { data = {}; }
+
+  if (response.status === 401) {
+    const err = new Error("Freebuff session auth failed (401) — re-login in the dashboard");
+    err.status = 401;
+    throw err;
+  }
+  if (!response.ok) {
+    const err = new Error(`Freebuff offer check failed: ${response.status} ${JSON.stringify(data).slice(0, 200)}`);
+    err.status = response.status;
+    throw err;
+  }
+
+  const offers = Array.isArray(data?.limitedModelOffers)
+    ? data.limitedModelOffers.filter((o) => o && typeof o.model === "string")
+    : [];
+  offerCache.set(token, { fetchedAt: now, offers });
+  return offers;
+}
+
+// For an offer-gated model (Fable), refuse the claim BEFORE the POST when the
+// backend is not currently advertising it. Returns the matching offer when the
+// claim may proceed. Throws a plain Error (no JSON tail) so the executor's
+// sessionGateFromError stays null and the cooldown maps are never touched —
+// a closed offer is availability, not a lock, and the pool can reopen any time.
+async function guardOfferClaim(token, model, proxyOptions) {
+  if (!OFFER_GATED_MODELS.has(model)) return null;
+
+  const offers = await fetchSessionOffers(token, proxyOptions);
+  const offer = offers.find((o) => o.model === model);
+  if (!offer || Number(offer.remaining) <= 0) {
+    const err = new Error(
+      `Claude Fable 5 is not being offered right now — it is a capacity-limited trial served in waves, and freebuff's shared Fable pool is currently empty. Watch the official freebuff CLI for the "Claude Fable 5 · N of M left" row, or retry later.`,
+    );
+    err.status = 409;
+    err.code = "offer_closed";
+    throw err;
+  }
+  const userLeft = Number(offer.userRemaining);
+  if (Number.isFinite(userLeft) && userLeft <= 0) {
+    const resetAt = Date.parse(offer.userResetAt || "");
+    const err = new Error(
+      `Your Freebuff account has used its Claude Fable 5 sessions for today (pool: ${offer.remaining} of ${offer.total} left)${Number.isFinite(resetAt) ? ` — next slot ${new Date(resetAt).toLocaleString()}` : ""}.`,
+    );
+    err.status = 409;
+    err.code = "offer_user_capped";
+    if (Number.isFinite(resetAt)) err.resetsAtMs = resetAt;
+    throw err;
+  }
+  return offer;
 }
 
 async function ensureSession(token, model, proxyOptions, force = false) {
@@ -394,6 +517,7 @@ async function finishRun(token, runId, status, proxyOptions) {
 export function resetSessionCache() {
   sessionCache.clear();
   inflight.clear();
+  offerCache.clear();
 }
 
 // Snapshot sizes of in-memory freebuff state (for the dashboard memory panel).
@@ -403,6 +527,7 @@ export function sessionStateSize() {
     inflight: inflight.size,
     modelLocks: modelLockCooldowns.size,
     poolLimits: poolLimitCooldowns.size,
+    offerCaches: offerCache.size,
   };
 }
 
@@ -414,6 +539,12 @@ export function pruneSessionState(now = Date.now()) {
   for (const [key, entry] of sessionCache) {
     if (entry?.expiresAt && entry.expiresAt <= now) {
       sessionCache.delete(key);
+      removed += 1;
+    }
+  }
+  for (const [key, entry] of offerCache) {
+    if (now - entry.fetchedAt >= OFFER_CACHE_TTL_MS) {
+      offerCache.delete(key);
       removed += 1;
     }
   }
@@ -686,6 +817,9 @@ export const __test__ = {
   injectFreebuffMarker,
   injectEndTurnTool,
   fetchWithNetworkRetry,
+  fetchSessionOffers,
+  guardOfferClaim,
+  OFFER_GATED_MODELS,
   FREEBUFF_SYSTEM_MARKER,
   SESSION_STALE_CODES,
 };

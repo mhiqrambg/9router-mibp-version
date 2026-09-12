@@ -287,9 +287,15 @@ export async function markAccountUnavailable(connectionId, status, errorText, pr
   } else if (resetsAtMs && resetsAtMs > Date.now()) {
     shouldFallback = true;
     // Antigravity quota API provides exact per-model resetAt. Do not truncate it.
-    cooldownMs = resolveProviderId(provider) === "antigravity"
+    // Freebucks exhaustion is likewise a hard stop until the daily Pacific
+    // reset (up to ~24h) — skip the account for the day rather than re-poke it
+    // every 30 min; guard at 26h so a bad server value can't lock forever.
+    const providerId = resolveProviderId(provider);
+    cooldownMs = providerId === "antigravity"
       ? resetsAtMs - Date.now()
-      : Math.min(resetsAtMs - Date.now(), MAX_RATE_LIMIT_COOLDOWN_MS);
+      : providerId === "freebuff"
+        ? Math.min(resetsAtMs - Date.now(), 26 * 60 * 60 * 1000)
+        : Math.min(resetsAtMs - Date.now(), MAX_RATE_LIMIT_COOLDOWN_MS);
     newBackoffLevel = 0;
   } else {
     ({ shouldFallback, cooldownMs, newBackoffLevel } = checkFallbackError(status, errorText, backoffLevel));

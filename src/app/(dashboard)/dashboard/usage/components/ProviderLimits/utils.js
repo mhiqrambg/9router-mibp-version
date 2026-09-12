@@ -259,6 +259,49 @@ export function formatResetTime(date) {
 }
 
 /**
+ * Freebucks account header line — mirrors upstream freebucksHeaderLine:
+ * "10/25 Freebucks daily · resets in 4h 12m · 20 in wallet · $6.50 monthly usage left".
+ * Wallet shown only when non-empty; monthly only when the server sent it
+ * (older servers omit it — showing $0 would read as "nothing left").
+ * @param {{balance: number|null, daily: {limit:number,spent:number,remaining:number,resetAt:string|null}, wallet:{balance:number}, monthly?:{remainingUsd:number,limitUsd:number|null,resetAt:string|null}}} freebucks
+ * @returns {string|null}
+ */
+export function formatFreebucksHeader(freebucks) {
+  if (!freebucks?.daily) return null;
+  const parts = [
+    `${Math.max(0, Math.round(freebucks.daily.remaining))}/${Math.max(0, Math.round(freebucks.daily.limit))} Freebucks daily`,
+  ];
+  const countdown = formatResetTime(freebucks.daily.resetAt);
+  if (countdown !== "-") parts.push(`resets in ${countdown}`);
+  if (Number(freebucks.wallet?.balance) > 0) {
+    parts.push(`${Math.max(0, Math.round(freebucks.wallet.balance))} in wallet`);
+  }
+  if (freebucks.monthly && Number.isFinite(Number(freebucks.monthly.remainingUsd))) {
+    parts.push(`${formatFreebucksUsd(freebucks.monthly.remainingUsd)} monthly usage left`);
+  }
+  return parts.join(" · ");
+}
+
+/**
+ * "$25", "$4.20", "$0" — whole dollars until the figure is small enough that
+ * the cents are the story. Mirrors upstream formatAllowanceUsd.
+ */
+export function formatFreebucksUsd(usd) {
+  const safe = Math.max(0, Number(usd));
+  if (safe >= 10) return `$${Math.round(safe)}`;
+  if (safe >= 1) return `$${safe.toFixed(1).replace(/\.0$/, "")}`;
+  return `$${safe.toFixed(2)}`;
+}
+
+/**
+ * "15 Freebucks/hr" — a bare number would read as dollars; the unit is the
+ * hour, not the message.
+ */
+export function formatFreebucksPrice(price) {
+  return `${Math.max(0, Math.round(Number(price) || 0))} Freebucks/hr`;
+}
+
+/**
  * Get Tailwind color class based on percentage
  * @param {number} percentage - Remaining percentage (0-100)
  * @returns {string} Color name: "green" | "yellow" | "red"
@@ -567,6 +610,8 @@ export function parseQuotaData(provider, data) {
       case "freebuff":
         // Session quotas keyed by model id — label rows with the friendly
         // displayName (from the registry) and keep modelKey for ordering.
+        // Metered rows carry the live Freebucks price (price) + promo tagline
+        // (priceNote), both server-authoritative.
         if (data.quotas) {
           Object.entries(data.quotas).forEach(([modelKey, quota]) => {
             normalizedQuotas.push({
@@ -576,6 +621,8 @@ export function parseQuotaData(provider, data) {
               total: quota.total || 0,
               resetAt: quota.resetAt || null,
               recurring: quota.recurring !== false,
+              price: quota.price,
+              priceNote: quota.priceNote,
             });
           });
         }

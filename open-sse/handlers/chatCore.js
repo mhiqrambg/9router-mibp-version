@@ -468,9 +468,11 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     }
     const errMsg = formatProviderError(error, provider, model, HTTP_STATUS.BAD_GATEWAY);
     if (log?.errorLine) {
-      log.errorLine(reqTag, "✗", `ERROR 502 · ${provider}/${model} · ${Date.now() - requestStartTime}ms\n    ${errMsg}`);
+      log.errorLine(reqTag, "✗", `ERROR ${error?.status || HTTP_STATUS.BAD_GATEWAY} · ${provider}/${model} · ${Date.now() - requestStartTime}ms\n    ${errMsg}`);
     }
-    return createErrorResult(HTTP_STATUS.BAD_GATEWAY, errMsg, error?.resetsAtMs || undefined);
+    // Carry the executor's own status (429/409 quota gates) when it threw one;
+    // fall back to 502 for generic throws.
+    return createErrorResult(error?.status || HTTP_STATUS.BAD_GATEWAY, errMsg, error?.resetsAtMs || undefined);
   }
 
   // Handle 401/403 - try token refresh (skip for noAuth providers)

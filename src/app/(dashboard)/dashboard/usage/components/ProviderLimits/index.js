@@ -9,6 +9,7 @@ import {
   parseQuotaData,
   calculatePercentage,
   filterQuotasByVisibility,
+  formatFreebucksHeader,
   getHiddenQuotaRows,
   getQuotaVisibilityKey,
   getConnectionLabel,
@@ -1237,6 +1238,11 @@ export default function ProviderLimits() {
               </div>
 
               <div className="px-2 py-1.5">
+                {quota?.raw?.freebucks && !error && !isLoading && (
+                  <div className="mb-1.5 rounded-md bg-black/[0.03] px-2 py-1.5 text-[10px] leading-relaxed text-text-muted dark:bg-white/[0.03]">
+                    {formatFreebucksHeader(quota.raw.freebucks)}
+                  </div>
+                )}
                 {isLoading ? (
                   <div className="text-center py-5 text-text-muted">
                     <span className="material-symbols-outlined text-[28px] animate-spin">

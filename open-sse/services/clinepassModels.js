@@ -5,17 +5,11 @@ const FETCH_TIMEOUT_MS = 5000;
 
 /**
  * Build request headers for the ClinePass /models endpoint (Cline's upstream API).
- * - API keys are sent as plain Bearer tokens.
- * - OAuth access tokens must carry the WorkOS `workos:` prefix (handled by buildClineHeaders).
+ * Auth shape lives in shared/clineAuth: API keys ride plain Bearer, OAuth
+ * access tokens carry the WorkOS `workos:` prefix.
  */
 function buildModelListHeaders(token, isApiKey) {
-  if (isApiKey) {
-    return {
-      Accept: "application/json",
-      Authorization: `Bearer ${token}`,
-    };
-  }
-  return buildClineHeaders(token, { Accept: "application/json" });
+  return buildClineHeaders(token, { Accept: "application/json" }, { isApiKey });
 }
 
 /**

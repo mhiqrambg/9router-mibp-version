@@ -73,7 +73,7 @@ describe("getUsageForProvider(freebuff)", () => {
       resetAt: "2026-08-06T07:00:00.000Z",
       recurring: true,
       unlimited: false,
-      displayName: "DeepSeek V4 Flash",
+      displayName: "DeepSeek V4.1 Flash",
     });
     expect(usage.quotas["openai/gpt-5.6-luna"]).toMatchObject({
       used: 1,
@@ -94,7 +94,7 @@ describe("getUsageForProvider(freebuff)", () => {
         status: "active",
         accessTier: "full",
         instanceId: "inst-1",
-        model: "deepseek/deepseek-v4-pro",
+        model: "meta/muse-spark-1.2-contributor",
         expiresAt: new Date(Date.now() + 3600000).toISOString(),
         rateLimit: {
           limit: 6,
@@ -112,11 +112,120 @@ describe("getUsageForProvider(freebuff)", () => {
     });
 
     expect(usage.plan).toBe("Freebuff");
-    expect(usage.quotas["deepseek/deepseek-v4-pro"]).toMatchObject({
+    expect(usage.quotas["meta/muse-spark-1.2-contributor"]).toMatchObject({
       used: 2.4,
       total: 6,
-      displayName: "DeepSeek V4 Pro",
+      displayName: "Muse Spark 1.2",
     });
+  });
+
+  it("reports the Freebucks daily pool under each priced model for metered accounts (no rateLimitsByModel)", async () => {
+    proxyAwareFetch.mockResolvedValueOnce(
+      jsonResponse({
+        status: "none",
+        accessTier: "limited",
+        rateLimitsByModel: {},
+        freebucks: {
+          balance: 10,
+          daily: { limit: 25, spent: 15, remaining: 10, resetAt: "2026-09-08T07:00:00.000Z" },
+          wallet: { balance: 0, monthlyBonus: 0 },
+          spend: { limitUsd: 4, resetAt: "2026-09-08T07:00:00.000Z" },
+          monthly: { limitUsd: 10, spentUsd: 3.5, remainingUsd: 6.5, resetAt: "2026-10-01T07:00:00.000Z" },
+          planId: null,
+          prices: { "deepseek/deepseek-v4-flash": 15, "z-ai/glm-5.3-flash": 5 },
+        },
+      }),
+    );
+
+    const usage = await getUsageForProvider({
+      provider: "freebuff",
+      accessToken: "tok-1",
+    });
+
+    expect(usage.message).toBeUndefined();
+    expect(usage.quotas["deepseek/deepseek-v4-flash"]).toMatchObject({
+      used: 15,
+      total: 25,
+      resetAt: "2026-09-08T07:00:00.000Z",
+      recurring: true,
+      unlimited: false,
+      price: 15,
+      displayName: "DeepSeek V4.1 Flash",
+    });
+    expect(usage.quotas["z-ai/glm-5.3-flash"]).toMatchObject({
+      used: 15,
+      total: 25,
+      price: 5,
+      displayName: "GLM 5.3 Flash",
+    });
+    // No session pools → only the freebucks-derived rows exist.
+    expect(Object.keys(usage.quotas)).toEqual([
+      "deepseek/deepseek-v4-flash",
+      "z-ai/glm-5.3-flash",
+    ]);
+    // Account summary rides the response for the card header (server data,
+    // nothing hardcoded client-side).
+    expect(usage.freebucks).toEqual({
+      balance: 10,
+      daily: {
+        limit: 25,
+        spent: 15,
+        remaining: 10,
+        resetAt: "2026-09-08T07:00:00.000Z",
+      },
+      wallet: { balance: 0 },
+      monthly: { remainingUsd: 6.5, limitUsd: 10, resetAt: "2026-10-01T07:00:00.000Z" },
+    });
+  });
+
+  it("folds the server's announced priceChanges into the live price (promos expire without a client release)", async () => {
+    proxyAwareFetch.mockResolvedValueOnce(
+      jsonResponse({
+        status: "none",
+        accessTier: "full",
+        rateLimitsByModel: {},
+        freebucks: {
+          balance: 20,
+          daily: { limit: 25, spent: 5, remaining: 20, resetAt: "2026-09-08T07:00:00.000Z" },
+          wallet: { balance: 0, monthlyBonus: 0 },
+          planId: null,
+          prices: { "upstage/solar-pro4": 0 },
+          priceNotices: { "upstage/solar-pro4": "0 Freebucks · Labor Day weekend (through Sep 7 PT)" },
+          priceChanges: [
+            {
+              at: "2026-01-01T00:00:00.000Z", // already due
+              modelId: "upstage/solar-pro4",
+              price: 5,
+              tagline: "Limited-time trial",
+            },
+          ],
+        },
+      }),
+    );
+
+    const usage = await getUsageForProvider({
+      provider: "freebuff",
+      accessToken: "tok-1",
+    });
+
+    // The due change is folded in: price 5 + new tagline, schedule emptied.
+    expect(usage.quotas["upstage/solar-pro4"]).toMatchObject({
+      price: 5,
+      priceNote: "Limited-time trial",
+      displayName: "Solar Pro 4",
+    });
+  });
+
+  it("attaches no price to legacy session-quota rows", async () => {
+    proxyAwareFetch.mockResolvedValueOnce(jsonResponse(PRE_JOIN));
+
+    const usage = await getUsageForProvider({
+      provider: "freebuff",
+      accessToken: "tok-1",
+    });
+
+    expect(usage.quotas["deepseek/deepseek-v4-flash"].price).toBeUndefined();
+    expect(usage.freebucks).toBeUndefined();
   });
 
   it("surfaces a re-login message on 401", async () => {
@@ -188,14 +297,14 @@ describe("parseQuotaData(freebuff)", () => {
           used: 4.1,
           total: 6,
           resetAt: "2026-08-06T07:00:00.000Z",
-          displayName: "DeepSeek V4 Flash",
+          displayName: "DeepSeek V4.1 Flash",
         },
       },
     });
 
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
-      name: "DeepSeek V4 Flash",
+      name: "DeepSeek V4.1 Flash",
       modelKey: "deepseek/deepseek-v4-flash",
       used: 4.1,
       total: 6,

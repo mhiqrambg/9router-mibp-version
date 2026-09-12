@@ -26,6 +26,9 @@ export default {
       combined: true,
       header: "Authorization",
       scheme: "bearer",
+      // Hook owns Authorization: workos:-prefixed OAuth vs plain API key
+      // (a merged token can't express both) — see applyAuth.
+      preserveHookAuth: true,
       hooks: [
         "clineHeaders",
       ],

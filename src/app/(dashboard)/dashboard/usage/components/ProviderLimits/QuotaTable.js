@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { formatResetTime, getRemainingPercentage } from "./utils";
+import { formatFreebucksPrice, formatResetTime, getRemainingPercentage } from "./utils";
 
 const PAGE_SIZE = 10;
 
@@ -168,9 +168,20 @@ export default function QuotaTable({
               {/* Name */}
               <div className="flex w-36 min-w-0 items-center gap-1.5">
                 <span className="text-[10px] shrink-0">{colors.emoji}</span>
-                <span className={`${nameText} font-medium text-text-primary truncate`}>
-                  {quota.name}
-                </span>
+                <div className="min-w-0">
+                  <div className={`${nameText} font-medium text-text-primary truncate`}>
+                    {quota.name}
+                  </div>
+                  {quota.price !== undefined && (
+                    <div
+                      className="text-[9px] leading-tight text-text-muted truncate"
+                      title={quota.priceNote || ""}
+                    >
+                      {formatFreebucksPrice(quota.price)}
+                      {quota.priceNote ? ` · ${quota.priceNote}` : ""}
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* Progress + used/total */}

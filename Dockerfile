@@ -1,5 +1,7 @@
 # syntax=docker/dockerfile:1.7
-ARG NODE_IMAGE=node:22-alpine
+# Pinned by digest so a base-image refresh cannot silently bump npm and break
+# `npm ci` against the committed lockfile (see v1.0.9 npm ci EUSAGE failure).
+ARG NODE_IMAGE=node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32
 FROM ${NODE_IMAGE} AS base
 WORKDIR /app
 

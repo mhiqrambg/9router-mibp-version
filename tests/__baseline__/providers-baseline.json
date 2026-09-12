@@ -137,6 +137,7 @@
       "combined": true,
       "header": "Authorization",
       "scheme": "bearer",
+      "preserveHookAuth": true,
       "hooks": [
         "clineHeaders"
       ]
@@ -153,6 +154,7 @@
       "combined": true,
       "header": "Authorization",
       "scheme": "bearer",
+      "preserveHookAuth": true,
       "hooks": [
         "clineHeaders"
       ]
@@ -275,6 +277,26 @@
     "baseUrl": "https://api.fireworks.ai/inference/v1/chat/completions",
     "validateUrl": "https://api.fireworks.ai/inference/v1/models",
     "format": "openai"
+  },
+  "freebuff": {
+    "baseUrl": "https://www.codebuff.com/api/v1/chat/completions",
+    "format": "openai",
+    "headers": {
+      "User-Agent": "ai-sdk/openai-compatible/1.0/codebuff"
+    },
+    "retry": {
+      "429": {
+        "attempts": 2,
+        "delayMs": 2000
+      },
+      "503": {
+        "attempts": 2,
+        "delayMs": 1500
+      }
+    },
+    "usage": {
+      "url": "https://www.codebuff.com/api/v1/freebuff/session"
+    }
   },
   "gemini-cli": {
     "baseUrl": "https://cloudcode-pa.googleapis.com/v1internal",
@@ -437,6 +459,9 @@
   "groq": {
     "baseUrl": "https://api.groq.com/openai/v1/chat/completions",
     "validateUrl": "https://api.groq.com/openai/v1/models",
+    "usage": {
+      "url": "https://api.groq.com/openai/v1/models"
+    },
     "format": "openai"
   },
   "hyperbolic": {
@@ -924,6 +949,32 @@
     "format": "openai",
     "tokenUrl": "https://www.codebuddy.ai/v2/plugin/auth/token"
   },
+  "trae": {
+    "baseUrl": "https://core-normal.trae.ai/api/remote/v1",
+    "format": "openai",
+    "headers": {
+      "X-Trae-Client-Type": "web",
+      "X-Preferenced-Language": "en",
+      "Referer": "https://solo.trae.ai/"
+    },
+    "auth": {
+      "combined": true,
+      "header": "Authorization",
+      "scheme": "Cloud-IDE-JWT"
+    },
+    "usage": {
+      "url": "https://api.marscode.com/cloudide/api/v3/trae/GetUserInfo"
+    },
+    "regions": {
+      "cn": "https://api.marscode.com",
+      "sg": "https://api.trae.ai",
+      "us": "https://www.trae.ai"
+    },
+    "defaultRegion": "cn",
+    "clientId": "ono9krqynydwx5",
+    "clientSecret": "-",
+    "tokenUrl": "https://api.marscode.com/cloudide/api/v3/trae/oauth/ExchangeToken"
+  },
   "zed": {
     "baseUrl": "https://cloud.zed.dev/completions",
     "format": "openai",
@@ -989,6 +1040,25 @@
     "baseUrl": "https://api.morphllm.com/v1/chat/completions",
     "validateUrl": "https://api.morphllm.com/v1/models",
     "format": "openai"
+  },
+  "devin-cli": {
+    "baseUrl": "devin://acp/stdio",
+    "format": "openai"
+  },
+  "windsurf": {
+    "baseUrl": "https://server.codeium.com/exa.language_server_pb.LanguageServerService/GetChatMessage",
+    "format": "openai",
+    "headers": {
+      "Content-Type": "application/grpc-web+proto",
+      "Accept": "application/grpc-web+proto",
+      "X-Grpc-Web": "1"
+    },
+    "auth": {
+      "combined": true,
+      "header": "Authorization",
+      "scheme": "Bearer"
+    },
+    "clientId": "3GUryQ7ldAeKEuD2obYnppsnmj58eP5u"
   },
   "poolside": {
     "baseUrl": "https://inference.poolside.ai/v1/chat/completions",
