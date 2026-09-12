@@ -45,6 +45,31 @@ function load() {
   return cache;
 }
 
+// Raw (slim-format) upstream catalog: every gateway entry from models.dev with
+// real limit values. Read side only — the sync writes it. Same mtime cache.
+let rawCache = null;
+let rawCachedMtime = -1;
+
+function loadRaw() {
+  let mtime;
+  try {
+    mtime = fs.statSync(CATALOG_RAW_FILE).mtimeMs;
+  } catch {
+    rawCache = null;
+    rawCachedMtime = -1;
+    return null;
+  }
+  if (mtime === rawCachedMtime && rawCache) return rawCache;
+
+  rawCachedMtime = mtime;
+  try {
+    rawCache = JSON.parse(fs.readFileSync(CATALOG_RAW_FILE, "utf8"));
+  } catch {
+    rawCache = null;
+  }
+  return rawCache;
+}
+
 // Modality is a property of the model itself — any gateway serving it inherits
 // the same image/video/pdf support, so this is keyed by model id alone.
 export function getCatalogModalities(model) {
@@ -52,11 +77,35 @@ export function getCatalogModalities(model) {
 }
 
 // Context and output limits are a property of the gateway, not the model: each
-// one truncates differently, so these stay keyed by provider + model.
+// one truncates differently, so these stay keyed by provider + model. When the
+// provider-specific delta misses (model served through a provider id the sync
+// never mapped), fall back to the raw upstream catalog: the base model's real
+// context/output from models.dev, taking the max across every gateway that
+// lists it (deterministic, not map-order dependent).
+function rawLimitFor(model) {
+  const raw = loadRaw();
+  if (!raw) return null;
+  const id = baseId(model);
+  let best = null;
+  for (const models of Object.values(raw)) {
+    const entry = models?.[id];
+    const ctx = entry?.c, out = entry?.o;
+    if (!Number.isFinite(ctx) || ctx <= 0) continue;
+    if (!best || ctx > best.c || (ctx === best.c && (out || 0) > (best.o || 0))) {
+      best = { c: ctx, o: out };
+    }
+  }
+  if (!best) return null;
+  return { contextWindow: best.c, maxOutput: Number.isFinite(best.o) && best.o > 0 ? best.o : null };
+}
+
 export function getCatalogLimits(provider, model) {
   const byProvider = provider && load().providers[provider];
-  if (!byProvider) return null;
-  return byProvider[model] || byProvider[baseId(model)] || null;
+  if (byProvider) {
+    const hit = byProvider[model] || byProvider[baseId(model)];
+    if (hit) return hit;
+  }
+  return rawLimitFor(model);
 }
 
 // Force a re-read on the next lookup (called right after a sync writes the file).

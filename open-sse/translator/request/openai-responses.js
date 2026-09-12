@@ -343,25 +343,43 @@ export function openaiToOpenAIResponsesRequest(model, body, stream, credentials)
         if (reasoningItem) result.input.push(reasoningItem);
       }
 
-      const contentType = msg.role === ROLE.USER ? RESPONSES_ITEM.INPUT_TEXT : RESPONSES_ITEM.OUTPUT_TEXT;
-      const content = typeof msg.content === "string"
-        ? [{ type: contentType, text: msg.content }]
-        : Array.isArray(msg.content)
-          ? msg.content.map(c => {
-            if (c.type === OPENAI_BLOCK.TEXT) return { type: contentType, text: c.text };
+      // Responses API input items only accept input_text/input_image content types.
+      // output_text is only valid in the *response* output, not in request input.
+      // Map assistant output_text → input_text so upstreams (e.g. claude-fable-5 on
+      // openai-compatible-responses nodes) don't reject the body with 400.
+      const inputContentType = RESPONSES_ITEM.INPUT_TEXT;
+      let content = [];
+      if (typeof msg.content === "string") {
+        if (msg.content.trim().length > 0) {
+          content = [{ type: inputContentType, text: msg.content }];
+        } else if (msg.role === ROLE.USER) {
+          // User turn must have at least one non-empty block
+          content = [{ type: inputContentType, text: "..." }];
+        }
+      } else if (Array.isArray(msg.content)) {
+        content = msg.content
+          .map(c => {
+            if (c.type === OPENAI_BLOCK.TEXT || c.type === RESPONSES_ITEM.OUTPUT_TEXT) {
+              const txt = typeof c.text === "string" ? c.text : "";
+              return txt.trim().length > 0 ? { type: inputContentType, text: txt } : null;
+            }
             // Convert Chat Completions image_url → Responses API input_image
-            // Responses API expects: { type: "input_image", image_url: "<url string>" }
-            // Chat Completions sends: { type: "image_url", image_url: { url: "...", detail: "..." } }
             if (c.type === OPENAI_BLOCK.IMAGE_URL) {
               const url = typeof c.image_url === "string" ? c.image_url : c.image_url?.url;
-              return { type: RESPONSES_ITEM.INPUT_IMAGE, image_url: url, detail: c.image_url?.detail || "auto" };
+              return url ? { type: RESPONSES_ITEM.INPUT_IMAGE, image_url: url, detail: c.image_url?.detail || "auto" } : null;
             }
             if (c.type === RESPONSES_ITEM.INPUT_IMAGE) return c;
             // Serialize any unknown type (tool_use, tool_result, thinking, etc.) as text
             const text = c.text || c.content || JSON.stringify(c);
-            return { type: contentType, text: typeof text === "string" ? text : JSON.stringify(text) };
+            const txt = typeof text === "string" ? text : JSON.stringify(text);
+            return txt && txt.trim().length > 0 ? { type: inputContentType, text: txt } : null;
           })
-          : [];
+          .filter(Boolean);
+
+        if (content.length === 0 && msg.role === ROLE.USER) {
+          content = [{ type: inputContentType, text: "..." }];
+        }
+      }
 
       // Only push a message block if content is non-empty.
       // Assistant messages with only tool_calls have content: null — skip the

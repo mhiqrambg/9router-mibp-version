@@ -235,6 +235,7 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
         "qoder",
         "grok-cli",
         "freebuff",
+        "zcode",
       ];
       if (deviceCodeProviders.includes(provider)) {
         setIsDeviceCode(true);
@@ -277,6 +278,11 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
             }
           : (provider === "kimi" || provider === "kimi-coding")
           ? { _kimiDeviceId: data._kimiDeviceId }
+          : provider === "zcode"
+          ? {
+              _zcodePollToken: data._zcodePollToken,
+              _zcodeLocalPollToken: data._zcodeLocalPollToken,
+            }
           : null;
         startPolling(
           data.device_code,

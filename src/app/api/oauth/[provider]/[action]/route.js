@@ -216,6 +216,7 @@ export async function GET(request, { params }) {
         "qoder",
         "grok-cli",
         "freebuff",
+        "zcode",
       ];
       let deviceData;
       if (noPkceDeviceProviders.includes(provider)) {
@@ -386,6 +387,7 @@ export async function POST(request, { params }) {
       let result;
       if (noPkceProviders.includes(provider)) {
         // kimi needs extraData._kimiDeviceId for stable X-Msh-Device-Id (CLIProxyAPI parity)
+        // zcode needs extraData._zcodePollToken for Bearer auth on poll endpoint
         result = await pollForToken(provider, deviceCode, null, extraData);
       } else if (provider === "kiro") {
         // Kiro needs extraData (clientId, clientSecret) from device code response
@@ -430,7 +432,7 @@ export async function POST(request, { params }) {
 
       // Still pending or error - don't create connection for pending states
       const isPending = result.pending || result.error === "authorization_pending" || result.error === "slow_down";
-      
+
       return NextResponse.json({
         success: false,
         error: result.error,

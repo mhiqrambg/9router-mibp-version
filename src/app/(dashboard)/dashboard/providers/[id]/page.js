@@ -5,8 +5,8 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { getProviderIconSrc, markProviderIconMissing } from "@/shared/utils/providerIcon";
-import { Card, Button, Badge, Input, Modal, CardSkeleton, OAuthModal, KiroOAuthWrapper, CursorAuthModal, IFlowCookieModal, GitLabAuthModal, Toggle, Select, EditConnectionModal, NoAuthProxyCard, ConfirmModal } from "@/shared/components";
-import { OAUTH_PROVIDERS, APIKEY_PROVIDERS, FREE_PROVIDERS, FREE_TIER_PROVIDERS, WEB_COOKIE_PROVIDERS, getProviderAlias, isOpenAICompatibleProvider, isAnthropicCompatibleProvider, AI_PROVIDERS } from "@/shared/constants/providers";
+import { Card, Button, Badge, Input, Modal, CardSkeleton, OAuthModal, KiroOAuthWrapper, CursorAuthModal, IFlowCookieModal, GitLabAuthModal, ZaiOAuthModal, Toggle, Select, EditConnectionModal, NoAuthProxyCard, ConfirmModal } from "@/shared/components";
+import { OAUTH_PROVIDERS, APIKEY_PROVIDERS, FREE_PROVIDERS, FREE_TIER_PROVIDERS, WEB_COOKIE_PROVIDERS, getProviderAlias, isOpenAICompatibleProvider, isAnthropicCompatibleProvider, AI_PROVIDERS, THINKING_CONFIG } from "@/shared/constants/providers";
 import { getModelsByProviderId, getModelKind } from "@/shared/constants/models";
 import { getThinkingLevels } from "open-sse/providers/thinkingLevels.js";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
@@ -82,6 +82,9 @@ export default function ProviderDetailPage() {
   const [oneByOneSummary, setOneByOneSummary] = useState(null);
   const stopOneByOneRef = useRef(false);
   const [importingQoderModels, setImportingQoderModels] = useState(false);
+  const [importingOpenCodeModels, setImportingOpenCodeModels] = useState(false);
+  const [testingAndPruning, setTestingAndPruning] = useState(false);
+  const [pruneStatus, setPruneStatus] = useState("");
   const { copied, copy } = useCopyToClipboard();
 
   const AG_RISK_STORAGE_KEY = "ag_risk_confirmed";
@@ -158,6 +161,7 @@ export default function ProviderDetailPage() {
   const hasDualAuthModes = !isCompatible && isOAuth && supportsApiKeyAuth;
   const oauthConnectionLabel =
     providerId === "xai" ? "Grok Build OAuth"
+    : providerId === "glm" ? "Z.AI OAuth"
     : providerId === "grok-cli" ? "Grok CLI Device Login"
     : providerId === "kimi" ? "Kimi Coding OAuth"
     : "OAuth";
@@ -671,6 +675,118 @@ export default function ProviderDetailPage() {
       alert(translate("Error fetching models") + ": " + error.message);
     } finally {
       setImportingQoderModels(false);
+    }
+  };
+
+  // Fetch models from /models for ANY provider and automatically add to available models
+  const handleImportUniversalModels = async () => {
+    if (importingOpenCodeModels) return;
+    const activeConnection = connections.find((conn) => conn.isActive !== false);
+    if (!activeConnection) {
+      alert("Please add an active connection first");
+      return;
+    }
+
+    setImportingOpenCodeModels(true);
+    try {
+      const res = await fetch(`/api/providers/${activeConnection.id}/models`);
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || "Failed to fetch models from provider");
+        return;
+      }
+      const fetchedModels = data.models || [];
+      if (fetchedModels.length === 0) {
+        alert("No models returned from provider /models endpoint");
+        return;
+      }
+
+      let importedCount = 0;
+      const prefixRegex = new RegExp(`^(${providerStorageAlias}|${providerDisplayAlias}|${providerId})\\/`);
+      for (const model of fetchedModels) {
+        const rawId = model.id || model.name;
+        if (!rawId) continue;
+        
+        const cleanModelId = String(rawId).replace(prefixRegex, "");
+        const alreadyExists = customModels.some(
+          (entry) => entry.providerAlias === providerStorageAlias && entry.id === cleanModelId && (entry.kind || entry.type || "llm") === "llm"
+        ) || Object.values(modelAliases).includes(`${providerStorageAlias}/${cleanModelId}`) || models.some((m) => m.id === cleanModelId);
+        if (alreadyExists) {
+          continue;
+        }
+
+        await handleAddCustomModel(cleanModelId, "llm", providerStorageAlias);
+        importedCount += 1;
+      }
+      
+      if (importedCount === 0) {
+        alert("All models already exist, no new models added.");
+      } else {
+        alert(`Successfully imported and added ${importedCount} models!`);
+      }
+    } catch (error) {
+      console.log("Error importing provider models:", error);
+      alert("Error fetching models: " + error.message);
+    } finally {
+      setImportingOpenCodeModels(false);
+    }
+  };
+
+  // Background poller on mount to track if host is currently testing & pruning
+  useEffect(() => {
+    let interval = null;
+    const checkHostStatus = async () => {
+      try {
+        const res = await fetch(`/api/models/test/auto-clean?provider=${encodeURIComponent(providerStorageAlias)}`);
+        const data = await res.json();
+        if (data.status === "running") {
+          setTestingAndPruning(true);
+          setPruneStatus(`[Host: ${data.current}/${data.total}] Testing: ${data.model || "..."}`);
+        } else if (data.status === "completed" && testingAndPruning) {
+          setTestingAndPruning(false);
+          setPruneStatus("");
+          await fetchCustomModels();
+          await fetchDisabledModels();
+          alert(`Host Auto-Clean Finished!\n✅ Working: ${data.passed}\n🗑️ Pruned: ${data.pruned}`);
+        } else if (data.status === "failed" && testingAndPruning) {
+          setTestingAndPruning(false);
+          setPruneStatus("");
+          alert(`Host Auto-Clean Error: ${data.error}`);
+        }
+      } catch {}
+    };
+
+    checkHostStatus();
+    interval = setInterval(checkHostStatus, 3000);
+    return () => clearInterval(interval);
+  }, [providerStorageAlias, testingAndPruning]);
+
+  // Start background auto-test & prune on HOST (server daemon)
+  const handleTestAndPruneModels = async () => {
+    if (testingAndPruning || connections.length === 0) return;
+
+    if (!confirm("Run Host-Level Auto-Test & Prune in the background? You can safely CLOSE your browser anytime while the host runs the test.")) {
+      return;
+    }
+
+    try {
+      setTestingAndPruning(true);
+      setPruneStatus("Starting Host Task...");
+      const res = await fetch("/api/models/test/auto-clean", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: providerStorageAlias }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || "Failed to trigger host auto-clean");
+        setTestingAndPruning(false);
+        setPruneStatus("");
+      }
+    } catch (err) {
+      alert("Error starting host auto-clean: " + err.message);
+      setTestingAndPruning(false);
+      setPruneStatus("");
     }
   };
 
@@ -1275,6 +1391,36 @@ export default function ProviderDetailPage() {
           </button>
         )}
 
+        {/* Universal Import from /models button for any provider with active connection */}
+        {connections.some((conn) => conn.isActive !== false) && (
+          <button
+            onClick={handleImportUniversalModels}
+            disabled={importingOpenCodeModels}
+            className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-emerald-500/40 px-3 py-2 text-xs text-emerald-600 dark:text-emerald-400 transition-colors hover:border-emerald-500 hover:bg-emerald-500/5 sm:w-auto disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Fetch live models from provider /models endpoint and auto-add to list"
+          >
+            <span className="material-symbols-outlined text-sm" style={importingOpenCodeModels ? { animation: "spin 1s linear infinite" } : undefined}>
+              {importingOpenCodeModels ? "progress_activity" : "download"}
+            </span>
+            {importingOpenCodeModels ? "Importing Models..." : "Import from /models"}
+          </button>
+        )}
+
+        {/* Auto-Test & Prune Broken/Paid Models */}
+        {connections.some((conn) => conn.isActive !== false) && (
+          <button
+            onClick={handleTestAndPruneModels}
+            disabled={testingAndPruning}
+            className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-amber-500/40 px-3 py-2 text-xs text-amber-600 dark:text-amber-400 transition-colors hover:border-amber-500 hover:bg-amber-500/5 sm:w-auto disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Test all models one-by-one; automatically remove or disable models requiring payment or failing"
+          >
+            <span className="material-symbols-outlined text-sm" style={testingAndPruning ? { animation: "spin 1s linear infinite" } : undefined}>
+              {testingAndPruning ? "progress_activity" : "auto_fix_high"}
+            </span>
+            {testingAndPruning ? (pruneStatus || "Testing & Pruning...") : "Auto-Test & Clean"}
+          </button>
+        )}
+
         {/* Suggested models from provider API — show only models not yet added */}
         {suggestedModels.length > 0 && (() => {
           const addedFullModels = new Set([
@@ -1815,6 +1961,13 @@ export default function ProviderDetailPage() {
         />
       ) : providerId === "gitlab" ? (
         <GitLabAuthModal
+          isOpen={showOAuthModal}
+          providerInfo={providerInfo}
+          onSuccess={handleOAuthSuccess}
+          onClose={() => setShowOAuthModal(false)}
+        />
+      ) : providerId === "glm" ? (
+        <ZaiOAuthModal
           isOpen={showOAuthModal}
           providerInfo={providerInfo}
           onSuccess={handleOAuthSuccess}

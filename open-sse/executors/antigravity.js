@@ -1,7 +1,7 @@
 import crypto from "crypto";
 import { BaseExecutor } from "./base.js";
 import { PROVIDERS } from "../config/providers.js";
-import { OAUTH_ENDPOINTS, ANTIGRAVITY_HEADERS, AG_DEFAULT_TOOLS, AG_TOOL_SUFFIX, ANTIGRAVITY_PROMPT_REWRITES } from "../config/appConstants.js";
+import { OAUTH_ENDPOINTS, ANTIGRAVITY_HEADERS, AG_DEFAULT_TOOLS, AG_TOOL_SUFFIX } from "../config/appConstants.js";
 import { HTTP_STATUS } from "../config/runtimeConfig.js";
 import { resolveSessionId } from "../utils/sessionManager.js";
 import { proxyAwareFetch } from "../utils/proxyFetch.js";
@@ -246,13 +246,13 @@ export class AntigravityExecutor extends BaseExecutor {
     const { tools: _originalTools, toolConfig: _originalToolConfig, ...requestWithoutTools } = body.request || {};
     stripBlacklisted(requestWithoutTools);
     
-    // Rewrite competing-client branding in system prompts (e.g. Zed's Claude prompt,
-    // OpenCode naming) so Antigravity doesn't flag the request with a 429 Quota Exhausted.
+    // Rewrite competitive system prompts (e.g. Zed IDE's Claude prompt) to prevent Antigravity from 
+    // flagging the request and immediately blocking it with a 429 Quota Exhausted response.
     if (requestWithoutTools.systemInstruction?.parts) {
+      const oldText = "You are a Claude agent, built on Anthropic's Claude Agent SDK.";
       for (const part of requestWithoutTools.systemInstruction.parts) {
-        if (typeof part.text !== "string") continue;
-        for (const { from, to } of ANTIGRAVITY_PROMPT_REWRITES) {
-          part.text = part.text.replaceAll(from, to);
+        if (typeof part.text === "string" && part.text.includes(oldText)) {
+          part.text = part.text.split(oldText).join("");
         }
       }
     }
@@ -260,6 +260,20 @@ export class AntigravityExecutor extends BaseExecutor {
     const generationConfig = { ...(requestWithoutTools.generationConfig || {}) };
     if (generationConfig.maxOutputTokens > MAX_ANTIGRAVITY_OUTPUT_TOKENS) {
       generationConfig.maxOutputTokens = MAX_ANTIGRAVITY_OUTPUT_TOKENS;
+    }
+
+    // Auto-inject uppercase thinkingConfig if calling gemini-3.8-flash variants
+    const targetModel = String(body.model || model || "");
+    if (targetModel.startsWith("gemini-3.8-flash")) {
+      let level = "HIGH";
+      if (targetModel.endsWith("-low")) level = "LOW";
+      else if (targetModel.endsWith("-medium")) level = "MEDIUM";
+      else if (targetModel.endsWith("-high")) level = "HIGH";
+
+      generationConfig.thinkingConfig = {
+        includeThoughts: true,
+        thinkingLevel: level
+      };
     }
 
     const transformedRequest = {
