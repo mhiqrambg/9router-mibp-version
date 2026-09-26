@@ -85,6 +85,9 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
   const [isDeviceCode, setIsDeviceCode] = useState(false);
   const [deviceData, setDeviceData] = useState(null);
   const [polling, setPolling] = useState(false);
+  // Latest transient poll-transport failure (flaky pool egress). Shown as a
+  // non-fatal hint while polling continues; becomes the error on deadline.
+  const [pollWarning, setPollWarning] = useState(null);
   // Optional proxy pool for the OAuth request itself (server egress may be
   // IP-limited while local works). Persisted per provider so a working
   // choice survives across attempts. Only sent for device-code flows.
@@ -194,11 +197,16 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
   const startPolling = useCallback(async (deviceCode, codeVerifier, interval, extraData, deadlineMs) => {
     pollingAbortRef.current = false;
     setPolling(true);
+    setPollWarning(null);
     // Honor the upstream's expires_in when supplied (qoder sets 300s) so we
     // don't time out earlier than the device code itself. Default 120s
     // matches the prior behavior for providers that don't surface a value.
     const startedAt = Date.now();
     const deadline = startedAt + (Number.isFinite(deadlineMs) && deadlineMs > 0 ? deadlineMs : 120_000);
+    // Transport failures (flaky pool egress, 5xx) are transient: remember the
+    // latest and keep polling until the deadline instead of killing the whole
+    // flow on one bad tick. 4xx = bad request, retrying can't help → fatal.
+    let lastTransportError = null;
 
     while (Date.now() < deadline) {
       // Check if polling should be aborted
@@ -232,11 +240,19 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
         });
 
         const data = await res.json();
-        // Transport/server failure (e.g. egress fetch failed with a cause
-        // chain) — surface immediately instead of polling into a timeout.
         if (!res.ok) {
-          throw new Error([data.error, data.errorCause].filter(Boolean).join(" | "));
+          const transportError = [data.error, data.errorCause].filter(Boolean).join(" | ") || `Poll failed: ${res.status}`;
+          if (res.status >= 500) {
+            // Transient (flaky pool egress / upstream hiccup) — keep polling,
+            // surface the latest failure if the deadline hits.
+            lastTransportError = transportError;
+            setPollWarning(transportError);
+            continue;
+          }
+          throw new Error(transportError);
         }
+        lastTransportError = null;
+        setPollWarning(null);
 
         if (data.success) {
           pollingAbortRef.current = true; // Stop polling immediately
@@ -247,21 +263,31 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
         }
 
         if (data.error === "expired_token" || data.error === "access_denied") {
-          throw new Error(data.errorDescription || data.error);
+          const fatal = new Error(data.errorDescription || data.error);
+          fatal.__oauthFatal = true;
+          throw fatal;
         }
 
         if (data.error === "slow_down") {
           interval = Math.min(interval + 5, 30);
         }
       } catch (err) {
-        setError(err.message);
-        setStep("error");
-        setPolling(false);
-        return;
+        // Modal→server network blip: transient like a 5xx, keep polling.
+        // (Terminal provider errors throw above with data.error set, but
+        // they also land here — rethrow those so access_denied etc. still
+        // fail fast instead of polling into the deadline.)
+        if (err?.__oauthFatal) {
+          setError(err.message);
+          setStep("error");
+          setPolling(false);
+          return;
+        }
+        lastTransportError = err.message;
+        setPollWarning(err.message);
       }
     }
 
-    setError("Authorization timeout");
+    setError(lastTransportError || "Authorization timeout");
     setStep("error");
     setPolling(false);
   }, [provider]);
@@ -546,6 +572,7 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
     setIsDeviceCode(false);
     setDeviceData(null);
     setPolling(false);
+    setPollWarning(null);
     setAuthMode("browser");
     setPasteToken("");
     setIdeStatus(null);
@@ -1020,6 +1047,11 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
                 <span className="material-symbols-outlined animate-spin">progress_activity</span>
                 Waiting for authorization...
               </div>
+            )}
+            {polling && pollWarning && (
+              <p className="text-center text-[11px] text-amber-600 dark:text-amber-400">
+                Retrying after poll failure: {pollWarning}
+              </p>
             )}
             <div className="mt-3">
               <OAuthProxyPoolSelect pools={proxyPools} value={oauthProxyPoolId} onChange={selectOauthProxyPool} />
