@@ -1,10 +1,11 @@
 import { GITHUB_CONFIG } from "../constants/oauth.js";
+import { fetchOAuthWithPool, oauthProxyPoolIdFrom } from "../oauthProxy.js";
 
 const github = {
   config: GITHUB_CONFIG,
   flowType: "device_code",
-  requestDeviceCode: async (config) => {
-    const response = await fetch(config.deviceCodeUrl, {
+  requestDeviceCode: async (config, _challenge, options = {}) => {
+    const response = await fetchOAuthWithPool(config.deviceCodeUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
@@ -14,7 +15,7 @@ const github = {
         client_id: config.clientId,
         scope: config.scopes,
       }),
-    });
+    }, oauthProxyPoolIdFrom(options));
 
     if (!response.ok) {
       const error = await response.text();
@@ -23,8 +24,8 @@ const github = {
 
     return await response.json();
   },
-  pollToken: async (config, deviceCode) => {
-    const response = await fetch(config.tokenUrl, {
+  pollToken: async (config, deviceCode, _verifier, _extra, options = {}) => {
+    const response = await fetchOAuthWithPool(config.tokenUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
@@ -35,7 +36,7 @@ const github = {
         device_code: deviceCode,
         grant_type: "urn:ietf:params:oauth:grant-type:device_code",
       }),
-    });
+    }, oauthProxyPoolIdFrom(options));
 
     // Handle response properly - if not ok, try to get error as text first
     let data;
@@ -52,27 +53,28 @@ const github = {
       data: data,
     };
   },
-  postExchange: async (tokens) => {
+  postExchange: async (tokens, options = {}) => {
+    const poolId = oauthProxyPoolIdFrom(options);
     // Get Copilot token using GitHub access token
-    const copilotRes = await fetch(GITHUB_CONFIG.copilotTokenUrl, {
+    const copilotRes = await fetchOAuthWithPool(GITHUB_CONFIG.copilotTokenUrl, {
       headers: {
         Authorization: `Bearer ${tokens.access_token}`,
         Accept: "application/json",
         "X-GitHub-Api-Version": GITHUB_CONFIG.apiVersion,
         "User-Agent": GITHUB_CONFIG.userAgent,
       },
-    });
+    }, poolId);
     const copilotToken = copilotRes.ok ? await copilotRes.json() : {};
 
     // Get user info from GitHub
-    const userRes = await fetch(GITHUB_CONFIG.userInfoUrl, {
+    const userRes = await fetchOAuthWithPool(GITHUB_CONFIG.userInfoUrl, {
       headers: {
         Authorization: `Bearer ${tokens.access_token}`,
         Accept: "application/json",
         "X-GitHub-Api-Version": GITHUB_CONFIG.apiVersion,
         "User-Agent": GITHUB_CONFIG.userAgent,
       },
-    });
+    }, poolId);
     const userInfo = userRes.ok ? await userRes.json() : {};
 
     return { copilotToken, userInfo };

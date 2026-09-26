@@ -8,6 +8,7 @@ import {
   pollForToken
 } from "@/lib/oauth/providers";
 import { createProviderConnection } from "@/models";
+import { errorCauseChain } from "@/lib/oauth/oauthProxy.js";
 import { readDesktopPassToken } from "open-sse/shared/mimoAccount.js";
 import {
   startCodexProxy,
@@ -245,13 +246,21 @@ export async function GET(request, { params }) {
       const startUrl = searchParams.get("start_url");
       const region = searchParams.get("region");
       const authMethod = searchParams.get("auth_method");
+      // Optional proxy pool for the OAuth request itself (Docker egress may be
+      // IP-limited while local works). Threaded through deviceOptions so
+      // providers that support it (codebuddy-cn/intl) route via the pool;
+      // others ignore the unknown key.
+      const proxyPoolId = searchParams.get("proxy_pool") || "";
       const deviceOptions = provider === "kiro"
         ? {
             ...(startUrl ? { startUrl } : {}),
             ...(region ? { region } : {}),
             ...(authMethod ? { authMethod } : {}),
+            ...(proxyPoolId ? { proxyPoolId } : {}),
           }
-        : undefined;
+        : proxyPoolId
+          ? { proxyPoolId }
+          : undefined;
       
       // Providers that don't use PKCE for device code (Grok CLI HAR: plain device_code, no challenge)
       const noPkceDeviceProviders = [
@@ -286,7 +295,11 @@ export async function GET(request, { params }) {
     return NextResponse.json({ error: "Unknown action" }, { status: 400 });
   } catch (error) {
     console.log("OAuth GET error:", error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    const cause = errorCauseChain(error);
+    return NextResponse.json(
+      { error: error.message, ...(cause ? { errorCause: cause } : {}) },
+      { status: 500 }
+    );
   }
 }
 
@@ -492,21 +505,24 @@ export async function POST(request, { params }) {
     }
 
     if (action === "poll") {
-      const { deviceCode, codeVerifier, extraData } = body;
+      const { deviceCode, codeVerifier, extraData, proxyPoolId } = body;
 
       if (!deviceCode) {
         return NextResponse.json({ error: "Missing device code" }, { status: 400 });
       }
 
+      // Same pool the device-code request used (see GET device-code
+      // `proxy_pool`); keeps poll on the working egress too.
+      const pollOptions = proxyPoolId ? { proxyPoolId } : undefined;
       // Providers that don't use PKCE for device code
       const noPkceProviders = ["github", "kimi", "kimi-coding", "kilocode", "codebuddy-cn", "codebuddy-intl"];
       let result;
       if (noPkceProviders.includes(provider)) {
         // kimi needs extraData._kimiDeviceId for stable X-Msh-Device-Id (CLIProxyAPI parity)
-        result = await pollForToken(provider, deviceCode, null, extraData);
+        result = await pollForToken(provider, deviceCode, null, extraData, pollOptions);
       } else if (provider === "kiro") {
         // Kiro needs extraData (clientId, clientSecret) from device code response
-        result = await pollForToken(provider, deviceCode, null, extraData);
+        result = await pollForToken(provider, deviceCode, null, extraData, pollOptions);
       } else if (provider === "qoder" || provider === "qoder-cn") {
         // Qoder needs both the PKCE verifier (codeVerifier) and the machineId
         // captured at device-code time (extraData._qoderMachineId) so
@@ -514,13 +530,13 @@ export async function POST(request, { params }) {
         if (!codeVerifier) {
           return NextResponse.json({ error: "Missing code verifier" }, { status: 400 });
         }
-        result = await pollForToken(provider, deviceCode, codeVerifier, extraData);
+        result = await pollForToken(provider, deviceCode, codeVerifier, extraData, pollOptions);
       } else {
         // Qwen and other PKCE providers
         if (!codeVerifier) {
           return NextResponse.json({ error: "Missing code verifier" }, { status: 400 });
         }
-        result = await pollForToken(provider, deviceCode, codeVerifier);
+        result = await pollForToken(provider, deviceCode, codeVerifier, undefined, pollOptions);
       }
 
       if (result.success) {
@@ -568,6 +584,10 @@ export async function POST(request, { params }) {
     return NextResponse.json({ error: "Unknown action" }, { status: 400 });
   } catch (error) {
     console.log("OAuth POST error:", error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    const cause = errorCauseChain(error);
+    return NextResponse.json(
+      { error: error.message, ...(cause ? { errorCause: cause } : {}) },
+      { status: 500 }
+    );
   }
 }

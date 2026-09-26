@@ -161,22 +161,25 @@ export async function requestDeviceCode(providerName, codeChallenge, options) {
  * @param {string} deviceCode - Device code from requestDeviceCode
  * @param {string} codeVerifier - PKCE code verifier (optional for some providers)
  * @param {object} extraData - Extra data from device code response (e.g. clientId/clientSecret for Kiro)
+ * @param {object} [options] - Extra options (e.g. { proxyPoolId } to route via a proxy pool)
  */
-export async function pollForToken(providerName, deviceCode, codeVerifier, extraData) {
+export async function pollForToken(providerName, deviceCode, codeVerifier, extraData, options) {
   const provider = getProvider(providerName);
   if (provider.flowType !== "device_code") {
     throw new Error(`Provider ${providerName} does not support device code flow`);
   }
 
-  const result = await provider.pollToken(provider.config, deviceCode, codeVerifier, extraData);
+  const result = await provider.pollToken(provider.config, deviceCode, codeVerifier, extraData, options || {});
 
   if (result.ok) {
     // For device code flows, success is only when we have an access token
     if (result.data.access_token) {
       // Call postExchange to get additional data (copilotToken, userInfo, etc.)
+      // Thread the same options (e.g. proxyPoolId) so profile lookups share
+      // the working egress; providers that ignore it are unaffected.
       let extra = null;
       if (provider.postExchange) {
-        extra = await provider.postExchange(result.data);
+        extra = await provider.postExchange(result.data, options || {});
       }
       const tokens = provider.mapTokens(result.data, extra);
       // Kiro IDC/Builder-ID tokens lack profileArn; resolve it to avoid 403

@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { FREEBUFF_CONFIG } from "../constants/oauth.js";
+import { fetchOAuthWithPool, oauthProxyPoolIdFrom } from "../oauthProxy.js";
 
 /**
  * Freebuff / Codebuff CLI login (fingerprint device-flow — NOT OAuth2):
@@ -28,10 +29,10 @@ const LOGIN_HOST = "https://freebuff.com";
 const freebuff = {
   config: FREEBUFF_CONFIG,
   flowType: "device_code",
-  requestDeviceCode: async (config) => {
+  requestDeviceCode: async (config, _challenge, options = {}) => {
     const fingerprintId = crypto.randomUUID();
     const baseUrl = (config.baseUrl || LOGIN_HOST).replace(/\/$/, "");
-    const response = await fetch(
+    const response = await fetchOAuthWithPool(
       `${baseUrl}${config.loginCodePath || "/api/auth/cli/code"}`,
       {
         method: "POST",
@@ -42,6 +43,7 @@ const freebuff = {
         },
         body: JSON.stringify({ fingerprintId }),
       },
+      oauthProxyPoolIdFrom(options),
     );
     if (!response.ok) {
       const error = await response.text();
@@ -75,7 +77,7 @@ const freebuff = {
       interval: 5,
     };
   },
-  pollToken: async (config, deviceCode) => {
+  pollToken: async (config, deviceCode, _verifier, _extra, options = {}) => {
     let parsed = {};
     try {
       parsed = JSON.parse(deviceCode) || {};
@@ -93,7 +95,7 @@ const freebuff = {
     // own 5-minute deadline).
     const baseUrl = (config.baseUrl || LOGIN_HOST).replace(/\/$/, "");
     const query = new URLSearchParams({ fingerprintId, fingerprintHash, expiresAt: String(expiresAt) });
-    const response = await fetch(
+    const response = await fetchOAuthWithPool(
       `${baseUrl}${config.loginStatusPath || "/api/auth/cli/status"}?${query.toString()}`,
       {
         method: "GET",
@@ -102,6 +104,7 @@ const freebuff = {
           "User-Agent": "codebuff-cli/0.0.138",
         },
       },
+      oauthProxyPoolIdFrom(options),
     );
     let data;
     try {

@@ -9,6 +9,49 @@ import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 // Browser OAuth: popup → auto callback → auto exchange → poll-status.
 const PROXY_OAUTH_PROVIDERS = new Set(["trae", "windsurf", "zed"]);
 
+// Device code flow providers (must match oauth providers with flowType: "device_code")
+const DEVICE_CODE_PROVIDERS = [
+  "github",
+  "kiro",
+  "kimi",
+  "kimi-coding",
+  "kilocode",
+  "codebuddy-cn",
+  "codebuddy-intl",
+  "qoder",
+  "qoder-cn",
+  "grok-cli",
+  "freebuff",
+];
+
+const oauthProxyPoolStorageKey = (providerId) => `9router.oauthProxyPool.${providerId}`;
+const oauthProxyPoolChosenKey = (providerId) => `9router.oauthProxyPool.${providerId}.chosen`;
+
+// Egress picker for device-code OAuth: direct (default) or one of the
+// configured proxy pools. Needed when the server's own egress is IP-limited
+// (Docker) while local works — the choice is sent as `proxy_pool` to
+// device-code and as `proxyPoolId` to poll.
+function OAuthProxyPoolSelect({ pools, value, onChange }) {
+  if (!Array.isArray(pools) || pools.length === 0) return null;
+  return (
+    <label className="flex items-center gap-2 text-xs text-text-muted">
+      <span className="shrink-0">Request via</span>
+      <select
+        value={value || ""}
+        onChange={(e) => onChange(e.target.value)}
+        className="min-w-0 flex-1 rounded-lg border border-border bg-surface px-2 py-1.5 text-xs text-text-main outline-none focus:border-primary"
+      >
+        <option value="">Direct (no proxy)</option>
+        {pools.map((p) => (
+          <option key={p.id} value={p.id}>
+            {p.name || p.id} ({p.type || "http"})
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 // Providers offering a paste-token fallback (import-token flow).
 // UX warns if the IDE (which issues the token) is not installed.
 const PASTE_TOKEN_PROVIDERS = {
@@ -43,6 +86,28 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
   const [isDeviceCode, setIsDeviceCode] = useState(false);
   const [deviceData, setDeviceData] = useState(null);
   const [polling, setPolling] = useState(false);
+  // Latest transient poll-transport failure (flaky pool egress). Shown as a
+  // non-fatal hint while polling continues; becomes the error on deadline.
+  const [pollWarning, setPollWarning] = useState(null);
+  // Optional proxy pool for the OAuth request itself (server egress may be
+  // IP-limited while local works). Persisted per provider so a working
+  // choice survives across attempts. Only sent for device-code flows.
+  const [oauthProxyPoolId, setOauthProxyPoolId] = useState("");
+  const [proxyPools, setProxyPools] = useState([]);
+  const oauthProxyPoolRef = useRef("");
+  const selectOauthProxyPool = useCallback((poolId) => {
+    const next = poolId || "";
+    oauthProxyPoolRef.current = next;
+    setOauthProxyPoolId(next);
+    try {
+      if (typeof window !== "undefined" && provider) {
+        if (next) window.localStorage.setItem(oauthProxyPoolStorageKey(provider), next);
+        else window.localStorage.removeItem(oauthProxyPoolStorageKey(provider));
+        // Any explicit pick (including back-to-Direct) counts as chosen.
+        window.localStorage.setItem(oauthProxyPoolChosenKey(provider), "1");
+      }
+    } catch { /* private mode — selection just won't persist */ }
+  }, [provider]);
   // trae/windsurf: choose between browser OAuth (proxy) and paste-token (import)
   const [authMode, setAuthMode] = useState("browser"); // "browser" | "paste-token"
   const [pasteToken, setPasteToken] = useState("");
@@ -102,7 +167,7 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
       });
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      if (!res.ok) throw new Error([data.error, data.errorCause].filter(Boolean).join(" | "));
 
       setStep("success");
       onSuccessRef.current?.();
@@ -121,7 +186,7 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
         body: JSON.stringify({ code, state: authData.state }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      if (!res.ok) throw new Error([data.error, data.errorCause].filter(Boolean).join(" | "));
 
       setStep("success");
       onSuccessRef.current?.();
@@ -135,11 +200,16 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
   const startPolling = useCallback(async (deviceCode, codeVerifier, interval, extraData, deadlineMs) => {
     pollingAbortRef.current = false;
     setPolling(true);
+    setPollWarning(null);
     // Honor the upstream's expires_in when supplied (qoder sets 300s) so we
     // don't time out earlier than the device code itself. Default 120s
     // matches the prior behavior for providers that don't surface a value.
     const startedAt = Date.now();
     const deadline = startedAt + (Number.isFinite(deadlineMs) && deadlineMs > 0 ? deadlineMs : 120_000);
+    // Transport failures (flaky pool egress, 5xx) are transient: remember the
+    // latest and keep polling until the deadline instead of killing the whole
+    // flow on one bad tick. 4xx = bad request, retrying can't help → fatal.
+    let lastTransportError = null;
 
     while (Date.now() < deadline) {
       // Check if polling should be aborted
@@ -162,10 +232,30 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
         const res = await fetch(`/api/oauth/${provider}/poll`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ deviceCode, codeVerifier, extraData }),
+          // proxyPoolId keeps polling on the same egress the device-code
+          // request used (Docker egress may be IP-limited).
+          body: JSON.stringify({
+            deviceCode,
+            codeVerifier,
+            extraData,
+            ...(oauthProxyPoolRef.current ? { proxyPoolId: oauthProxyPoolRef.current } : {}),
+          }),
         });
 
         const data = await res.json();
+        if (!res.ok) {
+          const transportError = [data.error, data.errorCause].filter(Boolean).join(" | ") || `Poll failed: ${res.status}`;
+          if (res.status >= 500) {
+            // Transient (flaky pool egress / upstream hiccup) — keep polling,
+            // surface the latest failure if the deadline hits.
+            lastTransportError = transportError;
+            setPollWarning(transportError);
+            continue;
+          }
+          throw new Error(transportError);
+        }
+        lastTransportError = null;
+        setPollWarning(null);
 
         if (data.success) {
           pollingAbortRef.current = true; // Stop polling immediately
@@ -176,21 +266,31 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
         }
 
         if (data.error === "expired_token" || data.error === "access_denied") {
-          throw new Error(data.errorDescription || data.error);
+          const fatal = new Error(data.errorDescription || data.error);
+          fatal.__oauthFatal = true;
+          throw fatal;
         }
 
         if (data.error === "slow_down") {
           interval = Math.min(interval + 5, 30);
         }
       } catch (err) {
-        setError(err.message);
-        setStep("error");
-        setPolling(false);
-        return;
+        // Modal→server network blip: transient like a 5xx, keep polling.
+        // (Terminal provider errors throw above with data.error set, but
+        // they also land here — rethrow those so access_denied etc. still
+        // fail fast instead of polling into the deadline.)
+        if (err?.__oauthFatal) {
+          setError(err.message);
+          setStep("error");
+          setPolling(false);
+          return;
+        }
+        lastTransportError = err.message;
+        setPollWarning(err.message);
       }
     }
 
-    setError("Authorization timeout");
+    setError(lastTransportError || "Authorization timeout");
     setStep("error");
     setPolling(false);
   }, [provider]);
@@ -267,6 +367,19 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
   // Start OAuth flow (plain function by design: it is only invoked from the
   // open effect via ref and from user actions, so memoization would only add
   // an identity that re-triggers effects on every parent re-render).
+  // Egress chooser (device-code only): runs the paused first attempt after an
+  // explicit choice. The choice is remembered, so this step shows once.
+  const startFromEgressChoice = () => {
+    try {
+      if (typeof window !== "undefined" && provider) {
+        window.localStorage.setItem(oauthProxyPoolChosenKey(provider), "1");
+      }
+    } catch { /* private mode — next open shows the chooser again */ }
+    setError(null);
+    setStep("waiting");
+    startOAuthFlow();
+  };
+
   const startOAuthFlow = async () => {
     if (!provider) return;
     try {
@@ -280,24 +393,14 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
       }
 
       // Device code flow providers (must match oauth providers with flowType: "device_code")
-      const deviceCodeProviders = [
-        "github",
-        "kiro",
-        "kimi",
-        "kimi-coding",
-        "kilocode",
-        "codebuddy-cn",
-        "codebuddy-intl",
-        "qoder",
-        "qoder-cn",
-        "grok-cli",
-        "freebuff",
-      ];
-      if (deviceCodeProviders.includes(provider)) {
+      if (DEVICE_CODE_PROVIDERS.includes(provider)) {
         setIsDeviceCode(true);
         setStep("waiting");
 
         const deviceCodeUrl = new URL(`/api/oauth/${provider}/device-code`, window.location.origin);
+        if (oauthProxyPoolRef.current) {
+          deviceCodeUrl.searchParams.set("proxy_pool", oauthProxyPoolRef.current);
+        }
         if (provider === "kiro" && idcConfig?.startUrl) {
           deviceCodeUrl.searchParams.set("start_url", idcConfig.startUrl);
           if (idcConfig.region) {
@@ -307,7 +410,7 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
         }
         const res = await fetch(deviceCodeUrl.toString());
         const data = await res.json();
-        if (!res.ok) throw new Error(data.error);
+        if (!res.ok) throw new Error([data.error, data.errorCause].filter(Boolean).join(" | "));
 
         setDeviceData(data);
 
@@ -368,7 +471,7 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
       }
       const res = await fetch(authorizeUrl.toString());
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      if (!res.ok) throw new Error([data.error, data.errorCause].filter(Boolean).join(" | "));
 
       // Codex: start proxy with server-side session (auto-exchange) + fallback to channels
       let codexProxyActive = false;
@@ -485,11 +588,42 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
     setIsDeviceCode(false);
     setDeviceData(null);
     setPolling(false);
+    setPollWarning(null);
     setAuthMode("browser");
     setPasteToken("");
     setIdeStatus(null);
     pollingAbortRef.current = false;
     flowRef.current = { proxyStarted: false, proxyProvider: null, stopSent: false };
+    // Restore the persisted proxy-pool choice for device-code providers and
+    // load the pool list for the picker (shown on egress/waiting/error steps).
+    // First open with no stored choice pauses on the egress chooser instead of
+    // burning a direct attempt that is doomed on IP-limited egress.
+    let pauseForEgressChoice = false;
+    if (DEVICE_CODE_PROVIDERS.includes(provider)) {
+      try {
+        const saved = typeof window !== "undefined"
+          ? window.localStorage.getItem(oauthProxyPoolStorageKey(provider)) || ""
+          : "";
+        oauthProxyPoolRef.current = saved;
+        setOauthProxyPoolId(saved);
+        const chosen = typeof window !== "undefined" && (
+          window.localStorage.getItem(oauthProxyPoolChosenKey(provider)) === "1" ||
+          saved !== ""
+        );
+        if (!chosen) {
+          setStep("egress");
+          pauseForEgressChoice = true;
+        }
+      } catch { oauthProxyPoolRef.current = ""; setOauthProxyPoolId(""); }
+      fetch("/api/proxy-pools?isActive=true", { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => setProxyPools(Array.isArray(d?.proxyPools) ? d.proxyPools : []))
+        .catch(() => setProxyPools([]));
+    } else {
+      oauthProxyPoolRef.current = "";
+      setOauthProxyPoolId("");
+      setProxyPools([]);
+    }
     // Best-effort IDE detection for paste-token providers (Trae/Windsurf)
     if (PASTE_TOKEN_PROVIDERS[provider]) {
       fetch(`/api/oauth/${provider}/ide-status`)
@@ -497,6 +631,7 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
         .then((data) => setIdeStatus(data))
         .catch(() => setIdeStatus({ installed: false, path: null }));
     }
+    if (pauseForEgressChoice) return;
     startOAuthFlowRef.current();
   }, [isOpen, provider]);
 
@@ -659,7 +794,7 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
           body: JSON.stringify({ code: token }),
         });
         const data = await res.json();
-        if (!res.ok) throw new Error(data.error);
+        if (!res.ok) throw new Error([data.error, data.errorCause].filter(Boolean).join(" | "));
         setStep("success");
         onSuccessRef.current?.();
         return;
@@ -683,7 +818,7 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
           }),
         });
         const data = await res.json();
-        if (!res.ok) throw new Error(data.error);
+        if (!res.ok) throw new Error([data.error, data.errorCause].filter(Boolean).join(" | "));
         setStep("success");
         onSuccessRef.current?.();
         return;
@@ -893,6 +1028,31 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
           </>
         )}
 
+        {/* Egress chooser — device-code first run with no stored choice */}
+        {step === "egress" && DEVICE_CODE_PROVIDERS.includes(provider) && (
+          <div className="space-y-3 py-2">
+            <p className="text-sm text-text-muted">
+              Choose how this login request reaches {providerInfo.name}. Direct uses this
+              server&apos;s IP; pick a pool if direct fails (IP-limited networks, Docker).
+            </p>
+            <OAuthProxyPoolSelect pools={proxyPools} value={oauthProxyPoolId} onChange={selectOauthProxyPool} />
+            {proxyPools.length === 0 && (
+              <p className="text-xs text-text-muted">
+                No proxy pools configured — continuing direct. Pools can be added under Dashboard → Proxy Pools.
+              </p>
+            )}
+            <div className="flex gap-2">
+              <Button onClick={startFromEgressChoice} fullWidth>
+                Start Login{oauthProxyPoolId ? " via Pool" : ""}
+              </Button>
+              <Button onClick={handleClose} variant="ghost" fullWidth>
+                Cancel
+              </Button>
+            </div>
+            <p className="text-[11px] text-text-muted">Your choice is remembered for next time.</p>
+          </div>
+        )}
+
         {/* Device Code Flow - Waiting */}
         {step === "waiting" && isDeviceCode && deviceData && (
           <>
@@ -922,6 +1082,10 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
                   </Button>
                 </div>
               </div>
+              {/* Some flows (codebuddy-cn/intl, sometimes freebuff) carry no
+                  user code — auth happens purely via the login URL + state.
+                  Hide the box instead of showing an empty one. */}
+              {deviceData.user_code && (
               <div className="bg-primary/10 p-4 rounded-lg">
                 <p className="text-xs text-text-muted mb-1">Your Code</p>
                 <div className="flex items-center justify-center gap-2">
@@ -934,6 +1098,7 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
                   />
                 </div>
               </div>
+              )}
             </div>
             {polling && (
               <div className="flex items-center justify-center gap-2 text-sm text-text-muted">
@@ -941,6 +1106,14 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
                 Waiting for authorization...
               </div>
             )}
+            {polling && pollWarning && (
+              <p className="text-center text-[11px] text-amber-600 dark:text-amber-400">
+                Retrying after poll failure: {pollWarning}
+              </p>
+            )}
+            <div className="mt-3">
+              <OAuthProxyPoolSelect pools={proxyPools} value={oauthProxyPoolId} onChange={selectOauthProxyPool} />
+            </div>
           </>
         )}
 
@@ -968,6 +1141,16 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
             </div>
             <h3 className="text-lg font-semibold mb-2">Connection Failed</h3>
             <p className="text-sm text-red-600 mb-4">{error}</p>
+            {isDeviceCode && (
+              <div className="mb-4 text-left">
+                <OAuthProxyPoolSelect pools={proxyPools} value={oauthProxyPoolId} onChange={selectOauthProxyPool} />
+                {oauthProxyPoolId && (
+                  <p className="mt-1 text-[11px] text-text-muted">
+                    Retry will send this OAuth request via the selected pool.
+                  </p>
+                )}
+              </div>
+            )}
             <div className="flex gap-2">
               <Button onClick={startOAuthFlow} variant="secondary" fullWidth>
                 Try Again

@@ -1,12 +1,13 @@
 import crypto from "crypto";
 import { KIMI_CONFIG } from "../constants/oauth.js";
+import { fetchOAuthWithPool, oauthProxyPoolIdFrom } from "../oauthProxy.js";
 
 // Kimi Code device flow (CLIProxyAPI internal/auth/kimi). Id is `kimi`;
 // `kimi-coding` remains an alias key so old UI/API routes still resolve.
 const kimi = {
   config: KIMI_CONFIG,
   flowType: "device_code",
-  requestDeviceCode: async (config) => {
+  requestDeviceCode: async (config, _challenge, options = {}) => {
     const { buildKimiHeaders } = await import("open-sse/config/appConstants.js");
     const deviceId = crypto.randomUUID();
     const headers = {
@@ -14,11 +15,11 @@ const kimi = {
       Accept: "application/json",
       ...buildKimiHeaders(deviceId),
     };
-    const response = await fetch(config.deviceCodeUrl, {
+    const response = await fetchOAuthWithPool(config.deviceCodeUrl, {
       method: "POST",
       headers,
       body: new URLSearchParams({ client_id: config.clientId }),
-    });
+    }, oauthProxyPoolIdFrom(options));
     if (!response.ok) {
       const error = await response.text();
       throw new Error(`Device code request failed: ${error}`);
@@ -37,7 +38,7 @@ const kimi = {
       _kimiDeviceId: deviceId,
     };
   },
-  pollToken: async (config, deviceCode, _codeVerifier, extraData) => {
+  pollToken: async (config, deviceCode, _codeVerifier, extraData, options = {}) => {
     const { buildKimiHeaders } = await import("open-sse/config/appConstants.js");
     const deviceId = extraData?._kimiDeviceId;
     const headers = {
@@ -45,7 +46,7 @@ const kimi = {
       Accept: "application/json",
       ...buildKimiHeaders(deviceId),
     };
-    const response = await fetch(config.tokenUrl, {
+    const response = await fetchOAuthWithPool(config.tokenUrl, {
       method: "POST",
       headers,
       body: new URLSearchParams({
@@ -53,7 +54,7 @@ const kimi = {
         client_id: config.clientId,
         device_code: deviceCode,
       }),
-    });
+    }, oauthProxyPoolIdFrom(options));
     let data;
     try {
       data = await response.json();

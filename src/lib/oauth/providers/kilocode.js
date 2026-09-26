@@ -1,13 +1,14 @@
 import { KILOCODE_CONFIG } from "../constants/oauth.js";
+import { fetchOAuthWithPool, oauthProxyPoolIdFrom } from "../oauthProxy.js";
 
 const kilocode = {
   config: KILOCODE_CONFIG,
   flowType: "device_code",
-  requestDeviceCode: async (config) => {
-    const response = await fetch(config.initiateUrl, {
+  requestDeviceCode: async (config, _challenge, options = {}) => {
+    const response = await fetchOAuthWithPool(config.initiateUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-    });
+    }, oauthProxyPoolIdFrom(options));
     if (!response.ok) {
       if (response.status === 429) {
         throw new Error("Too many pending authorization requests. Please try again later.");
@@ -25,8 +26,9 @@ const kilocode = {
       interval: 3,
     };
   },
-  pollToken: async (config, deviceCode) => {
-    const response = await fetch(`${config.pollUrlBase}/${deviceCode}`);
+  pollToken: async (config, deviceCode, _verifier, _extra, options = {}) => {
+    const poolId = oauthProxyPoolIdFrom(options);
+    const response = await fetchOAuthWithPool(`${config.pollUrlBase}/${deviceCode}`, {}, poolId);
     if (response.status === 202) return { ok: false, data: { error: "authorization_pending" } };
     if (response.status === 403) return { ok: false, data: { error: "access_denied", error_description: "Authorization denied by user" } };
     if (response.status === 410) return { ok: false, data: { error: "expired_token", error_description: "Authorization code expired" } };
@@ -36,9 +38,9 @@ const kilocode = {
       // Fetch profile to get orgId for X-Kilocode-OrganizationID header
       let orgId = null;
       try {
-        const profileRes = await fetch(`${config.apiBaseUrl}/api/profile`, {
+        const profileRes = await fetchOAuthWithPool(`${config.apiBaseUrl}/api/profile`, {
           headers: { "Authorization": `Bearer ${data.token}` }
-        });
+        }, poolId);
         if (profileRes.ok) {
           const profile = await profileRes.json();
           orgId = profile.organizations?.[0]?.id || null;

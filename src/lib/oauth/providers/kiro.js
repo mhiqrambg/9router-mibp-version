@@ -1,11 +1,13 @@
 import { KIRO_CONFIG, assertValidAwsRegion } from "../constants/oauth.js";
 import { extractEmailFromAccessToken } from "../providerHelpers.js";
+import { fetchOAuthWithPool, oauthProxyPoolIdFrom } from "../oauthProxy.js";
 
 const kiro = {
   config: KIRO_CONFIG,
   flowType: "device_code",
   // Kiro uses AWS SSO OIDC - requires client registration first
   requestDeviceCode: async (config, codeChallenge, options = {}) => {
+    const poolId = oauthProxyPoolIdFrom(options);
     const trimmedRegion = typeof options.region === "string" ? options.region.trim() : "";
     const region = trimmedRegion || "us-east-1";
     assertValidAwsRegion(region);
@@ -16,7 +18,7 @@ const kiro = {
     const deviceAuthUrl = `https://oidc.${region}.amazonaws.com/device_authorization`;
 
     // Step 1: Register client with AWS SSO OIDC
-    const registerRes = await fetch(registerClientUrl, {
+    const registerRes = await fetchOAuthWithPool(registerClientUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -29,7 +31,7 @@ const kiro = {
         grantTypes: config.grantTypes,
         issuerUrl: config.issuerUrl,
       }),
-    });
+    }, poolId);
 
     if (!registerRes.ok) {
       const error = await registerRes.text();
@@ -39,7 +41,7 @@ const kiro = {
     const clientInfo = await registerRes.json();
 
     // Step 2: Request device authorization
-    const deviceRes = await fetch(deviceAuthUrl, {
+    const deviceRes = await fetchOAuthWithPool(deviceAuthUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -50,7 +52,7 @@ const kiro = {
         clientSecret: clientInfo.clientSecret,
         startUrl,
       }),
-    });
+    }, poolId);
 
     if (!deviceRes.ok) {
       const error = await deviceRes.text();
@@ -75,11 +77,11 @@ const kiro = {
       _startUrl: startUrl,
     };
   },
-  pollToken: async (config, deviceCode, codeVerifier, extraData) => {
+  pollToken: async (config, deviceCode, codeVerifier, extraData, options = {}) => {
     const region = extraData?._region || "us-east-1";
     assertValidAwsRegion(region);
     const tokenUrl = `https://oidc.${region}.amazonaws.com/token`;
-    const response = await fetch(tokenUrl, {
+    const response = await fetchOAuthWithPool(tokenUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -91,7 +93,7 @@ const kiro = {
         deviceCode: deviceCode,
         grantType: "urn:ietf:params:oauth:grant-type:device_code",
       }),
-    });
+    }, oauthProxyPoolIdFrom(options));
 
     let data;
     try {
