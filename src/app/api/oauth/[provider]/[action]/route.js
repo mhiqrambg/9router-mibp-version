@@ -8,6 +8,7 @@ import {
   pollForToken
 } from "@/lib/oauth/providers";
 import { createProviderConnection } from "@/models";
+import { errorCauseChain } from "@/lib/oauth/oauthProxy.js";
 import { readDesktopPassToken } from "open-sse/shared/mimoAccount.js";
 import {
   startCodexProxy,
@@ -294,7 +295,11 @@ export async function GET(request, { params }) {
     return NextResponse.json({ error: "Unknown action" }, { status: 400 });
   } catch (error) {
     console.log("OAuth GET error:", error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    const cause = errorCauseChain(error);
+    return NextResponse.json(
+      { error: error.message, ...(cause ? { errorCause: cause } : {}) },
+      { status: 500 }
+    );
   }
 }
 
@@ -579,6 +584,10 @@ export async function POST(request, { params }) {
     return NextResponse.json({ error: "Unknown action" }, { status: 400 });
   } catch (error) {
     console.log("OAuth POST error:", error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    const cause = errorCauseChain(error);
+    return NextResponse.json(
+      { error: error.message, ...(cause ? { errorCause: cause } : {}) },
+      { status: 500 }
+    );
   }
 }

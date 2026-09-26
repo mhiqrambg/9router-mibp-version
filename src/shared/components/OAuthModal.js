@@ -161,7 +161,7 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
       });
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      if (!res.ok) throw new Error([data.error, data.errorCause].filter(Boolean).join(" | "));
 
       setStep("success");
       onSuccessRef.current?.();
@@ -180,7 +180,7 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
         body: JSON.stringify({ code, state: authData.state }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      if (!res.ok) throw new Error([data.error, data.errorCause].filter(Boolean).join(" | "));
 
       setStep("success");
       onSuccessRef.current?.();
@@ -232,6 +232,11 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
         });
 
         const data = await res.json();
+        // Transport/server failure (e.g. egress fetch failed with a cause
+        // chain) — surface immediately instead of polling into a timeout.
+        if (!res.ok) {
+          throw new Error([data.error, data.errorCause].filter(Boolean).join(" | "));
+        }
 
         if (data.success) {
           pollingAbortRef.current = true; // Stop polling immediately
@@ -363,7 +368,7 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
         }
         const res = await fetch(deviceCodeUrl.toString());
         const data = await res.json();
-        if (!res.ok) throw new Error(data.error);
+        if (!res.ok) throw new Error([data.error, data.errorCause].filter(Boolean).join(" | "));
 
         setDeviceData(data);
 
@@ -424,7 +429,7 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
       }
       const res = await fetch(authorizeUrl.toString());
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      if (!res.ok) throw new Error([data.error, data.errorCause].filter(Boolean).join(" | "));
 
       // Codex: start proxy with server-side session (auto-exchange) + fallback to channels
       let codexProxyActive = false;
@@ -734,7 +739,7 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
           body: JSON.stringify({ code: token }),
         });
         const data = await res.json();
-        if (!res.ok) throw new Error(data.error);
+        if (!res.ok) throw new Error([data.error, data.errorCause].filter(Boolean).join(" | "));
         setStep("success");
         onSuccessRef.current?.();
         return;
@@ -758,7 +763,7 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
           }),
         });
         const data = await res.json();
-        if (!res.ok) throw new Error(data.error);
+        if (!res.ok) throw new Error([data.error, data.errorCause].filter(Boolean).join(" | "));
         setStep("success");
         onSuccessRef.current?.();
         return;

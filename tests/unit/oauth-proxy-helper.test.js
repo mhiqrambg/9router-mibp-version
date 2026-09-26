@@ -18,6 +18,7 @@ vi.mock("open-sse/utils/proxyFetch.js", () => ({
 import {
   fetchOAuthWithPool,
   oauthProxyPoolIdFrom,
+  errorCauseChain,
 } from "../../src/lib/oauth/oauthProxy.js";
 
 function jsonResponse(obj, ok = true) {
@@ -30,6 +31,26 @@ describe("oauthProxyPoolIdFrom", () => {
     expect(oauthProxyPoolIdFrom({ proxy_pool: "pool-2" })).toBe("pool-2");
     expect(oauthProxyPoolIdFrom({})).toBeNull();
     expect(oauthProxyPoolIdFrom()).toBeNull();
+  });
+});
+
+describe("errorCauseChain", () => {
+  it("flattens an undici-style cause chain with codes", () => {
+    const err = new TypeError("fetch failed", {
+      cause: Object.assign(
+        new Error("Connect Timeout Error (attempted address: www.codebuddy.ai:443, timeout: 10000ms)"),
+        { code: "UND_ERR_CONNECT_TIMEOUT" }
+      ),
+    });
+    expect(errorCauseChain(err)).toBe(
+      "Connect Timeout Error (attempted address: www.codebuddy.ai:443, timeout: 10000ms) [UND_ERR_CONNECT_TIMEOUT]"
+    );
+  });
+
+  it("returns empty string when there is no cause", () => {
+    expect(errorCauseChain(new Error("boom"))).toBe("");
+    expect(errorCauseChain(null)).toBe("");
+    expect(errorCauseChain(undefined)).toBe("");
   });
 });
 

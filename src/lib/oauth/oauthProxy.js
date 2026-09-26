@@ -38,3 +38,24 @@ export async function fetchOAuthWithPool(url, options = {}, proxyPoolId = null) 
 export function oauthProxyPoolIdFrom(options = {}) {
   return String(options?.proxyPoolId || options?.proxy_pool || "").trim() || null;
 }
+
+/**
+ * Flatten an error's `cause` chain (undici wraps the real failure — e.g.
+ * ConnectTimeoutError with address/timeout — inside a bare "fetch failed")
+ * into a short human-readable string for API error responses. Without this
+ * the modal can only show "fetch failed" and the actionable detail stays
+ * server-side in the logs.
+ */
+export function errorCauseChain(err, maxDepth = 3) {
+  const parts = [];
+  let cur = err?.cause;
+  let depth = 0;
+  while (cur && depth < maxDepth) {
+    const msg = typeof cur === "string" ? cur : cur.message || String(cur);
+    const code = cur && typeof cur === "object" && cur.code ? ` [${cur.code}]` : "";
+    if (msg) parts.push(`${msg}${code}`);
+    cur = cur && typeof cur === "object" ? cur.cause : null;
+    depth++;
+  }
+  return parts.join(" <- ");
+}
