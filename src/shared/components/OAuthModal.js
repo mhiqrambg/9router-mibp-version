@@ -1082,6 +1082,10 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
                   </Button>
                 </div>
               </div>
+              {/* Some flows (codebuddy-cn/intl, sometimes freebuff) carry no
+                  user code — auth happens purely via the login URL + state.
+                  Hide the box instead of showing an empty one. */}
+              {deviceData.user_code && (
               <div className="bg-primary/10 p-4 rounded-lg">
                 <p className="text-xs text-text-muted mb-1">Your Code</p>
                 <div className="flex items-center justify-center gap-2">
@@ -1094,6 +1098,7 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
                   />
                 </div>
               </div>
+              )}
             </div>
             {polling && (
               <div className="flex items-center justify-center gap-2 text-sm text-text-muted">
