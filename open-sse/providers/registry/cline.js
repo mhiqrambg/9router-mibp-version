@@ -53,11 +53,11 @@ export default {
     // cline-free/* aliases require Cline product headers (see shared/clineAuth.js)
     // or upstream 403s with "only available via Cline product surfaces".
     { id: "cline-free/muse-spark-1.3-contributor", name: "Muse Spark 1.3 (Free)" },
-    { id: "deepseek/deepseek-v4-flash", name: "DeepSeek V4 Flash (Free)" },
-    { id: "z-ai/glm-5.3-flash", name: "GLM 5.3 Flash (Free)" },
-    { id: "cline-free/solar-pro4", name: "Solar Pro 4 (Free)" },
-    { id: "cline-free/longcat-2.0", name: "LongCat 2.0 (Free)" },
-    { id: "poolside/laguna-s-2.1:free", name: "Laguna S 2.1 (Free)" },
+    { id: "stealth/pixel-canary", name: "Pixel Canary (Free)" },
+    { id: "stealth/space-bunny-alpha", name: "Space Bunny Alpha (Free)" },
+    { id: "cline-free/mimo-v2.6-flash", name: "MiMo V2.6 Flash (Free)" },
+    { id: "cline-free/deepseek-v4.1-flash", name: "DeepSeek V4.1 Flash (Free)" },
+    { id: "cline-free/gemini-3.8-flash", name: "Gemini 3.8 Flash (Free)" },
   ],
   oauth: {
     appBaseUrl: "https://app.cline.bot",
