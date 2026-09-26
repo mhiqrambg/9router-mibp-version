@@ -9,6 +9,48 @@ import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 // Browser OAuth: popup → auto callback → auto exchange → poll-status.
 const PROXY_OAUTH_PROVIDERS = new Set(["trae", "windsurf", "zed"]);
 
+// Device code flow providers (must match oauth providers with flowType: "device_code")
+const DEVICE_CODE_PROVIDERS = [
+  "github",
+  "kiro",
+  "kimi",
+  "kimi-coding",
+  "kilocode",
+  "codebuddy-cn",
+  "codebuddy-intl",
+  "qoder",
+  "qoder-cn",
+  "grok-cli",
+  "freebuff",
+];
+
+const oauthProxyPoolStorageKey = (providerId) => `9router.oauthProxyPool.${providerId}`;
+
+// Egress picker for device-code OAuth: direct (default) or one of the
+// configured proxy pools. Needed when the server's own egress is IP-limited
+// (Docker) while local works — the choice is sent as `proxy_pool` to
+// device-code and as `proxyPoolId` to poll.
+function OAuthProxyPoolSelect({ pools, value, onChange }) {
+  if (!Array.isArray(pools) || pools.length === 0) return null;
+  return (
+    <label className="flex items-center gap-2 text-xs text-text-muted">
+      <span className="shrink-0">Request via</span>
+      <select
+        value={value || ""}
+        onChange={(e) => onChange(e.target.value)}
+        className="min-w-0 flex-1 rounded-lg border border-border bg-surface px-2 py-1.5 text-xs text-text-main outline-none focus:border-primary"
+      >
+        <option value="">Direct (no proxy)</option>
+        {pools.map((p) => (
+          <option key={p.id} value={p.id}>
+            {p.name || p.id} ({p.type || "http"})
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 // Providers offering a paste-token fallback (import-token flow).
 // UX warns if the IDE (which issues the token) is not installed.
 const PASTE_TOKEN_PROVIDERS = {
@@ -43,6 +85,23 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
   const [isDeviceCode, setIsDeviceCode] = useState(false);
   const [deviceData, setDeviceData] = useState(null);
   const [polling, setPolling] = useState(false);
+  // Optional proxy pool for the OAuth request itself (server egress may be
+  // IP-limited while local works). Persisted per provider so a working
+  // choice survives across attempts. Only sent for device-code flows.
+  const [oauthProxyPoolId, setOauthProxyPoolId] = useState("");
+  const [proxyPools, setProxyPools] = useState([]);
+  const oauthProxyPoolRef = useRef("");
+  const selectOauthProxyPool = useCallback((poolId) => {
+    const next = poolId || "";
+    oauthProxyPoolRef.current = next;
+    setOauthProxyPoolId(next);
+    try {
+      if (typeof window !== "undefined" && provider) {
+        if (next) window.localStorage.setItem(oauthProxyPoolStorageKey(provider), next);
+        else window.localStorage.removeItem(oauthProxyPoolStorageKey(provider));
+      }
+    } catch { /* private mode — selection just won't persist */ }
+  }, [provider]);
   // trae/windsurf: choose between browser OAuth (proxy) and paste-token (import)
   const [authMode, setAuthMode] = useState("browser"); // "browser" | "paste-token"
   const [pasteToken, setPasteToken] = useState("");
@@ -162,7 +221,14 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
         const res = await fetch(`/api/oauth/${provider}/poll`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ deviceCode, codeVerifier, extraData }),
+          // proxyPoolId keeps polling on the same egress the device-code
+          // request used (Docker egress may be IP-limited).
+          body: JSON.stringify({
+            deviceCode,
+            codeVerifier,
+            extraData,
+            ...(oauthProxyPoolRef.current ? { proxyPoolId: oauthProxyPoolRef.current } : {}),
+          }),
         });
 
         const data = await res.json();
@@ -280,24 +346,14 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
       }
 
       // Device code flow providers (must match oauth providers with flowType: "device_code")
-      const deviceCodeProviders = [
-        "github",
-        "kiro",
-        "kimi",
-        "kimi-coding",
-        "kilocode",
-        "codebuddy-cn",
-        "codebuddy-intl",
-        "qoder",
-        "qoder-cn",
-        "grok-cli",
-        "freebuff",
-      ];
-      if (deviceCodeProviders.includes(provider)) {
+      if (DEVICE_CODE_PROVIDERS.includes(provider)) {
         setIsDeviceCode(true);
         setStep("waiting");
 
         const deviceCodeUrl = new URL(`/api/oauth/${provider}/device-code`, window.location.origin);
+        if (oauthProxyPoolRef.current) {
+          deviceCodeUrl.searchParams.set("proxy_pool", oauthProxyPoolRef.current);
+        }
         if (provider === "kiro" && idcConfig?.startUrl) {
           deviceCodeUrl.searchParams.set("start_url", idcConfig.startUrl);
           if (idcConfig.region) {
@@ -490,6 +546,25 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
     setIdeStatus(null);
     pollingAbortRef.current = false;
     flowRef.current = { proxyStarted: false, proxyProvider: null, stopSent: false };
+    // Restore the persisted proxy-pool choice for device-code providers and
+    // load the pool list for the picker (shown on waiting/error steps).
+    if (DEVICE_CODE_PROVIDERS.includes(provider)) {
+      try {
+        const saved = typeof window !== "undefined"
+          ? window.localStorage.getItem(oauthProxyPoolStorageKey(provider)) || ""
+          : "";
+        oauthProxyPoolRef.current = saved;
+        setOauthProxyPoolId(saved);
+      } catch { oauthProxyPoolRef.current = ""; setOauthProxyPoolId(""); }
+      fetch("/api/proxy-pools?isActive=true", { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => setProxyPools(Array.isArray(d?.proxyPools) ? d.proxyPools : []))
+        .catch(() => setProxyPools([]));
+    } else {
+      oauthProxyPoolRef.current = "";
+      setOauthProxyPoolId("");
+      setProxyPools([]);
+    }
     // Best-effort IDE detection for paste-token providers (Trae/Windsurf)
     if (PASTE_TOKEN_PROVIDERS[provider]) {
       fetch(`/api/oauth/${provider}/ide-status`)
@@ -941,6 +1016,9 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
                 Waiting for authorization...
               </div>
             )}
+            <div className="mt-3">
+              <OAuthProxyPoolSelect pools={proxyPools} value={oauthProxyPoolId} onChange={selectOauthProxyPool} />
+            </div>
           </>
         )}
 
@@ -968,6 +1046,16 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
             </div>
             <h3 className="text-lg font-semibold mb-2">Connection Failed</h3>
             <p className="text-sm text-red-600 mb-4">{error}</p>
+            {isDeviceCode && (
+              <div className="mb-4 text-left">
+                <OAuthProxyPoolSelect pools={proxyPools} value={oauthProxyPoolId} onChange={selectOauthProxyPool} />
+                {oauthProxyPoolId && (
+                  <p className="mt-1 text-[11px] text-text-muted">
+                    Retry will send this OAuth request via the selected pool.
+                  </p>
+                )}
+              </div>
+            )}
             <div className="flex gap-2">
               <Button onClick={startOAuthFlow} variant="secondary" fullWidth>
                 Try Again

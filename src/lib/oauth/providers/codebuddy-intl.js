@@ -1,12 +1,13 @@
 import { CODEBUDDY_INTL_CONFIG } from "../constants/oauth.js";
 import { extractEmailFromAccessToken, extractDisplayNameFromAccessToken } from "../providerHelpers.js";
+import { fetchOAuthWithPool, oauthProxyPoolIdFrom } from "../oauthProxy.js";
 
 // CodeBuddy International — mirrors codebuddy-cn flow against the .ai domain.
 const codebuddyIntl = {
   config: CODEBUDDY_INTL_CONFIG,
   flowType: "device_code",
-  requestDeviceCode: async (config) => {
-    const response = await fetch(`${config.stateUrl}?platform=${config.platform}`, {
+  requestDeviceCode: async (config, _challenge, options = {}) => {
+    const response = await fetchOAuthWithPool(`${config.stateUrl}?platform=${config.platform}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -19,7 +20,7 @@ const codebuddyIntl = {
         "X-Product": "SaaS",
       },
       body: "{}",
-    });
+    }, oauthProxyPoolIdFrom(options));
     if (!response.ok) throw new Error(`CodeBuddy Intl state request failed: ${await response.text()}`);
     const data = await response.json();
     if (data.code !== 0 || !data.data?.state || !data.data?.authUrl) {
@@ -33,8 +34,8 @@ const codebuddyIntl = {
       _isCodeBuddy: true,
     };
   },
-  pollToken: async (config, deviceCode) => {
-    const response = await fetch(`${config.tokenUrl}?state=${encodeURIComponent(deviceCode)}`, {
+  pollToken: async (config, deviceCode, _verifier, _extra, options = {}) => {
+    const response = await fetchOAuthWithPool(`${config.tokenUrl}?state=${encodeURIComponent(deviceCode)}`, {
       method: "GET",
       headers: {
         Accept: "application/json",
@@ -47,7 +48,7 @@ const codebuddyIntl = {
         "X-No-Department-Info": "true",
         "X-Product": "SaaS",
       },
-    });
+    }, oauthProxyPoolIdFrom(options));
     if (!response.ok) return { ok: false, data: { error: "request_failed" } };
     const data = await response.json();
     if (data.code === 0 && data.data?.accessToken) {

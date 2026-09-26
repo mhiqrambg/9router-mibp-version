@@ -1,4 +1,5 @@
 import { QODER_CONFIG } from "../constants/oauth.js";
+import { oauthProxyPoolIdFrom } from "../oauthProxy.js";
 
 /**
  * Build a Qoder device-code provider for a region. `config` is the registry
@@ -35,9 +36,10 @@ export function createQoderProvider(config) {
         _qoderMachineId: flow.machineId,
       };
     },
-    pollToken: async (cfg, deviceCode, codeVerifier, extraData) => {
+    pollToken: async (cfg, deviceCode, codeVerifier, extraData, options = {}) => {
       const { QoderService } = await import("@/lib/oauth/services/qoder");
       const svc = new QoderService(cfg);
+      const poolId = oauthProxyPoolIdFrom(options);
       const nonce = deviceCode || extraData?._qoderNonce;
       const verifier = codeVerifier || extraData?._qoderVerifier;
       if (!nonce || !verifier) {
@@ -48,7 +50,7 @@ export function createQoderProvider(config) {
       }
       let result;
       try {
-        result = await svc.pollDeviceToken({ nonce, codeVerifier: verifier });
+        result = await svc.pollDeviceToken({ nonce, codeVerifier: verifier, proxyPoolId: poolId });
       } catch (err) {
         return {
           ok: false,
@@ -59,7 +61,7 @@ export function createQoderProvider(config) {
         return { ok: false, data: { error: "authorization_pending" } };
       }
       // Best-effort profile lookup so we have a name/email to display.
-      const userInfo = await svc.fetchUserInfo(result.accessToken);
+      const userInfo = await svc.fetchUserInfo(result.accessToken, poolId);
       // expireTime is a Unix-ms timestamp from QoderService.parseExpiry,
       // which already falls back to "now + 30 days" when the upstream
       // omits expiry. Floor to a sane minimum (1 day) so a stale or

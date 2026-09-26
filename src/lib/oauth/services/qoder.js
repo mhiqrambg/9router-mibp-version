@@ -39,12 +39,17 @@ function base64Url(buf) {
 /**
  * Wrap fetch with an AbortController-based timeout. Without this, a stalled
  * upstream socket hangs on Node's default keepalive timeout (minutes) and
- * abandoned polls accumulate hung sockets.
+ * abandoned polls accumulate hung sockets. When proxyPoolId is set, the
+ * request goes through that proxy pool instead (Docker egress IP limits).
  */
-async function fetchWithTimeout(url, init = {}) {
+async function fetchWithTimeout(url, init = {}, proxyPoolId = null) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort("timeout"), FETCH_TIMEOUT_MS);
   try {
+    if (proxyPoolId) {
+      const { fetchOAuthWithPool } = await import("../oauthProxy.js");
+      return await fetchOAuthWithPool(url, { ...init, signal: controller.signal }, proxyPoolId);
+    }
     return await fetch(url, { ...init, signal: controller.signal });
   } finally {
     clearTimeout(timer);
@@ -115,7 +120,7 @@ export class QoderService {
    *
    * Upstream returns 202/404 while waiting; 200 with a JSON body when done.
    */
-  async pollDeviceToken({ nonce, codeVerifier }) {
+  async pollDeviceToken({ nonce, codeVerifier, proxyPoolId = null }) {
     if (!nonce || !codeVerifier) {
       throw new Error("pollDeviceToken: missing nonce or code verifier");
     }
@@ -127,7 +132,7 @@ export class QoderService {
         Accept: "application/json",
         "User-Agent": "Go-http-client/2.0",
       },
-    });
+    }, proxyPoolId);
 
     // Pending — server has registered the device code but the user hasn't
     // finished the browser flow yet. Both 202 and 404 mean "keep polling".
@@ -174,7 +179,7 @@ export class QoderService {
    * Fetch profile info for the freshly-issued token. Best-effort — failures
    * shouldn't block login; returning empty strings is fine.
    */
-  async fetchUserInfo(accessToken) {
+  async fetchUserInfo(accessToken, proxyPoolId = null) {
     try {
       const response = await fetchWithTimeout(this.userInfoUrl(), {
         method: "GET",
@@ -183,7 +188,7 @@ export class QoderService {
           Accept: "application/json",
           "User-Agent": "Go-http-client/2.0",
         },
-      });
+      }, proxyPoolId);
       if (!response.ok) return { name: "", email: "" };
       const body = await response.json();
       return {
