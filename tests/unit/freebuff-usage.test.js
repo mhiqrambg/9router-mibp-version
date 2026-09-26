@@ -31,7 +31,7 @@ const PRE_JOIN = {
       resetAt: "2026-08-06T07:00:00.000Z",
       entitlementBreakdown: { base: 6, referral: 0, streak: 0 },
     },
-    "openai/gpt-5.6-luna": {
+    "openai/gpt-6-luna": {
       limit: 6,
       recentCount: 1,
       period: "pacific_day",
@@ -75,10 +75,10 @@ describe("getUsageForProvider(freebuff)", () => {
       unlimited: false,
       displayName: "DeepSeek V4.1 Flash",
     });
-    expect(usage.quotas["openai/gpt-5.6-luna"]).toMatchObject({
+    expect(usage.quotas["openai/gpt-6-luna"]).toMatchObject({
       used: 1,
       total: 6,
-      displayName: "GPT-5.6 Luna",
+      displayName: "GPT-6 Luna",
     });
 
     // Quota reads MUST be GET (a POST would claim a session and burn quota).
