@@ -41,7 +41,7 @@ const SESSION_DEFAULT_TTL_MS = 60 * 60 * 1000; // active sessions live ~1h
 const SESSION_STALE_CODES = new Set([428, 409, 410]);
 
 // Models the backend runs as a CAPACITY-LIMITED OFFER rather than a standing
-// picker row. Claude Fable 5 is not in the client catalog at all: the server
+// picker row. Claude Fable 5.1 is not in the client catalog at all: the server
 // advertises it per-session-response (`limitedModelOffers`) only while its
 // shared wave pool has sessions left, and a request without a live offer is
 // refused. A claim must therefore peek at the current offers first instead of
@@ -49,7 +49,7 @@ const SESSION_STALE_CODES = new Set([428, 409, 410]);
 // renders from that payload). Offer state is per-account and cached briefly —
 // the pool can reopen at any time, so a closed offer must NOT set a long
 // cooldown.
-const OFFER_GATED_MODELS = new Set(["anthropic/claude-fable-5"]);
+const OFFER_GATED_MODELS = new Set(["anthropic/claude-fable-5.1"]);
 const OFFER_CACHE_TTL_MS = 45_000;
 
 // The free tier rejects requests whose first system message doesn't open with
@@ -117,20 +117,24 @@ function injectEndTurnTool(body) {
 // base2 roots during the transition).
 //
 // Withdrawn upstream models (deepseek-v4-pro, minimax-m3, stealth/ox-alpha,
-// google/gemini-3.8-flash, meta/muse-spark-1.3-contributor) are deliberately
-// absent: no new session can be admitted on them, so mapping them would only
-// hide a dead pick behind a wrong root. z-ai/glm-5.2 stays mapped
-// (referral-earned accounts can still run it) even though it is not a
-// standing picker row.
+// google/gemini-3.8-flash, meta/muse-spark-1.3-contributor,
+// openai/gpt-5.6-luna) are deliberately absent: no new session can be admitted
+// on them, so mapping them would only hide a dead pick behind a wrong root.
+// The 5.6-luna root stays (released clients drain on it; server coerces).
+// z-ai/glm-5.2 stays mapped (referral-earned accounts can still run it) even
+// though it is not a standing picker row.
 const FREE_ROOT_AGENT_BY_MODEL = {
   "deepseek/deepseek-v4-flash": "base3-free-deepseek-flash",
   "z-ai/glm-5.2": "base3-free-glm",
   "z-ai/glm-5.3-flash": "base3-free-glm-5-3-flash",
   "mimo/mimo-v2.5": "base3-free-mimo",
   "openai/gpt-5.6-luna": "base3-free-luna",
+  "openai/gpt-6-luna": "base3-free-luna-6",
   "upstage/solar-pro4": "base3-free-solar-pro4",
+  "upstage/solar-mini4": "base3-free-solar-mini4",
+  "stealth/space-bunny-alpha": "base3-free-space-bunny-alpha",
   "meta/muse-spark-1.2-contributor": "base3-free-muse-spark",
-  "anthropic/claude-fable-5": "base3-free-fable",
+  "anthropic/claude-fable-5.1": "base3-free-fable",
 };
 
 // Per-token+model session cache (in-memory; keyed so multi-account setups
@@ -416,7 +420,7 @@ async function guardOfferClaim(token, model, proxyOptions) {
   const offer = offers.find((o) => o.model === model);
   if (!offer || Number(offer.remaining) <= 0) {
     const err = new Error(
-      `Claude Fable 5 is not being offered right now — it is a capacity-limited trial served in waves, and freebuff's shared Fable pool is currently empty. Watch the official freebuff CLI for the "Claude Fable 5 · N of M left" row, or retry later.`,
+      `Claude Fable 5.1 is not being offered right now — it is a capacity-limited trial served in waves, and freebuff's shared Fable pool is currently empty. Watch the official freebuff CLI for the "Claude Fable 5 · N of M left" row, or retry later.`,
     );
     err.status = 409;
     err.code = "offer_closed";
@@ -426,7 +430,7 @@ async function guardOfferClaim(token, model, proxyOptions) {
   if (Number.isFinite(userLeft) && userLeft <= 0) {
     const resetAt = Date.parse(offer.userResetAt || "");
     const err = new Error(
-      `Your Freebuff account has used its Claude Fable 5 sessions for today (pool: ${offer.remaining} of ${offer.total} left)${Number.isFinite(resetAt) ? ` — next slot ${new Date(resetAt).toLocaleString()}` : ""}.`,
+      `Your Freebuff account has used its Claude Fable 5.1 sessions for today (pool: ${offer.remaining} of ${offer.total} left)${Number.isFinite(resetAt) ? ` — next slot ${new Date(resetAt).toLocaleString()}` : ""}.`,
     );
     err.status = 409;
     err.code = "offer_user_capped";

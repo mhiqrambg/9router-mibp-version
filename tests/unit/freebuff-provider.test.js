@@ -398,8 +398,8 @@ describe("freebuff session pre-flight", () => {
   });
 });
 
-describe("freebuff limited-offer (Claude Fable 5) claims", () => {
-  const FABLE = "anthropic/claude-fable-5";
+describe("freebuff limited-offer (Claude Fable 5.1) claims", () => {
+  const FABLE = "anthropic/claude-fable-5.1";
   const offerRow = (over = {}) => ({
     model: FABLE,
     remaining: 3,
@@ -446,7 +446,7 @@ describe("freebuff limited-offer (Claude Fable 5) claims", () => {
     fetchMock.mockResolvedValue(
       jsonResponse({ status: "none", limitedModelOffers: [offerRow({ userRemaining: 0 })] }),
     );
-    await expect(guardOfferClaim("tok-1", FABLE, null)).rejects.toThrow(/has used its Claude Fable 5 sessions/i);
+    await expect(guardOfferClaim("tok-1", FABLE, null)).rejects.toThrow(/has used its Claude Fable 5\.1 sessions/i);
   });
 
   it("claims a Fable session only after the offer passes: GET offers, then POST claim", async () => {
@@ -519,9 +519,12 @@ describe("freebuff run registration", () => {
     expect(rootAgentIdForModel("z-ai/glm-5.2")).toBe("base3-free-glm");
     expect(rootAgentIdForModel("mimo/mimo-v2.5")).toBe("base3-free-mimo");
     expect(rootAgentIdForModel("openai/gpt-5.6-luna")).toBe("base3-free-luna");
+    expect(rootAgentIdForModel("openai/gpt-6-luna")).toBe("base3-free-luna-6");
     expect(rootAgentIdForModel("upstage/solar-pro4")).toBe("base3-free-solar-pro4");
+    expect(rootAgentIdForModel("upstage/solar-mini4")).toBe("base3-free-solar-mini4");
+    expect(rootAgentIdForModel("stealth/space-bunny-alpha")).toBe("base3-free-space-bunny-alpha");
     expect(rootAgentIdForModel("meta/muse-spark-1.2-contributor")).toBe("base3-free-muse-spark");
-    expect(rootAgentIdForModel("anthropic/claude-fable-5")).toBe("base3-free-fable");
+    expect(rootAgentIdForModel("anthropic/claude-fable-5.1")).toBe("base3-free-fable");
     // Withdrawn upstream models are unmapped — they fall back, and the backend
     // refuses their sessions anyway.
     expect(rootAgentIdForModel("meta/muse-spark-1.3-contributor")).toBe("base2-free");
