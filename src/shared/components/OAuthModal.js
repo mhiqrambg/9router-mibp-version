@@ -25,6 +25,7 @@ const DEVICE_CODE_PROVIDERS = [
 ];
 
 const oauthProxyPoolStorageKey = (providerId) => `9router.oauthProxyPool.${providerId}`;
+const oauthProxyPoolChosenKey = (providerId) => `9router.oauthProxyPool.${providerId}.chosen`;
 
 // Egress picker for device-code OAuth: direct (default) or one of the
 // configured proxy pools. Needed when the server's own egress is IP-limited
@@ -102,6 +103,8 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
       if (typeof window !== "undefined" && provider) {
         if (next) window.localStorage.setItem(oauthProxyPoolStorageKey(provider), next);
         else window.localStorage.removeItem(oauthProxyPoolStorageKey(provider));
+        // Any explicit pick (including back-to-Direct) counts as chosen.
+        window.localStorage.setItem(oauthProxyPoolChosenKey(provider), "1");
       }
     } catch { /* private mode — selection just won't persist */ }
   }, [provider]);
@@ -364,6 +367,19 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
   // Start OAuth flow (plain function by design: it is only invoked from the
   // open effect via ref and from user actions, so memoization would only add
   // an identity that re-triggers effects on every parent re-render).
+  // Egress chooser (device-code only): runs the paused first attempt after an
+  // explicit choice. The choice is remembered, so this step shows once.
+  const startFromEgressChoice = () => {
+    try {
+      if (typeof window !== "undefined" && provider) {
+        window.localStorage.setItem(oauthProxyPoolChosenKey(provider), "1");
+      }
+    } catch { /* private mode — next open shows the chooser again */ }
+    setError(null);
+    setStep("waiting");
+    startOAuthFlow();
+  };
+
   const startOAuthFlow = async () => {
     if (!provider) return;
     try {
@@ -579,7 +595,10 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
     pollingAbortRef.current = false;
     flowRef.current = { proxyStarted: false, proxyProvider: null, stopSent: false };
     // Restore the persisted proxy-pool choice for device-code providers and
-    // load the pool list for the picker (shown on waiting/error steps).
+    // load the pool list for the picker (shown on egress/waiting/error steps).
+    // First open with no stored choice pauses on the egress chooser instead of
+    // burning a direct attempt that is doomed on IP-limited egress.
+    let pauseForEgressChoice = false;
     if (DEVICE_CODE_PROVIDERS.includes(provider)) {
       try {
         const saved = typeof window !== "undefined"
@@ -587,6 +606,14 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
           : "";
         oauthProxyPoolRef.current = saved;
         setOauthProxyPoolId(saved);
+        const chosen = typeof window !== "undefined" && (
+          window.localStorage.getItem(oauthProxyPoolChosenKey(provider)) === "1" ||
+          saved !== ""
+        );
+        if (!chosen) {
+          setStep("egress");
+          pauseForEgressChoice = true;
+        }
       } catch { oauthProxyPoolRef.current = ""; setOauthProxyPoolId(""); }
       fetch("/api/proxy-pools?isActive=true", { cache: "no-store" })
         .then((r) => (r.ok ? r.json() : null))
@@ -604,6 +631,7 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
         .then((data) => setIdeStatus(data))
         .catch(() => setIdeStatus({ installed: false, path: null }));
     }
+    if (pauseForEgressChoice) return;
     startOAuthFlowRef.current();
   }, [isOpen, provider]);
 
@@ -998,6 +1026,31 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
               </Button>
             </div>
           </>
+        )}
+
+        {/* Egress chooser — device-code first run with no stored choice */}
+        {step === "egress" && DEVICE_CODE_PROVIDERS.includes(provider) && (
+          <div className="space-y-3 py-2">
+            <p className="text-sm text-text-muted">
+              Choose how this login request reaches {providerInfo.name}. Direct uses this
+              server&apos;s IP; pick a pool if direct fails (IP-limited networks, Docker).
+            </p>
+            <OAuthProxyPoolSelect pools={proxyPools} value={oauthProxyPoolId} onChange={selectOauthProxyPool} />
+            {proxyPools.length === 0 && (
+              <p className="text-xs text-text-muted">
+                No proxy pools configured — continuing direct. Pools can be added under Dashboard → Proxy Pools.
+              </p>
+            )}
+            <div className="flex gap-2">
+              <Button onClick={startFromEgressChoice} fullWidth>
+                Start Login{oauthProxyPoolId ? " via Pool" : ""}
+              </Button>
+              <Button onClick={handleClose} variant="ghost" fullWidth>
+                Cancel
+              </Button>
+            </div>
+            <p className="text-[11px] text-text-muted">Your choice is remembered for next time.</p>
+          </div>
         )}
 
         {/* Device Code Flow - Waiting */}
