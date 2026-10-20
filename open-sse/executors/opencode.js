@@ -359,6 +359,43 @@ const IP_LIMIT_BODY = /limit|rate|quota|exhausted|capacity|too many|retry/i;
 // fix; marking pools unfit there would just burn quota retrying clean IPs.
 const IP_BLOCK_BODY = /abusive traffic|from your current network/i;
 
+// The gateway tells us how long its egress ban lasts. Honour it so the pool is
+// benched for the real duration instead of the generic 5-minute default — and
+// cap it, because a stale Retry-After of 13 hours should not park a pool for a
+// whole day on one bad response.
+const RETRY_AFTER_MAX_MS = 6 * 60 * 60 * 1000;
+
+function readRetryAfterHeader(headers, name) {
+  if (typeof headers?.get === "function") return headers.get(name);
+  if (!headers) return null;
+  return headers[name] ?? headers[name.toLowerCase()] ?? null;
+}
+
+/**
+ * Absolute epoch-ms until which the pool should be benched, from the upstream
+ * Retry-After / Retry-After-Ms headers. Returns undefined when absent/invalid
+ * so callers fall back to the default ban duration.
+ */
+export function retryAfterUntil(headers, now = Date.now()) {
+  const ms = readRetryAfterHeader(headers, "retry-after-ms");
+  const seconds = readRetryAfterHeader(headers, "retry-after");
+  let waitMs = null;
+  if (ms != null && ms !== "") {
+    const parsed = Number(ms);
+    if (Number.isFinite(parsed) && parsed > 0) waitMs = parsed;
+  } else if (seconds != null && seconds !== "") {
+    const parsed = Number(seconds);
+    if (Number.isFinite(parsed) && parsed > 0) waitMs = parsed * 1000;
+    else {
+      // HTTP-date form of Retry-After.
+      const at = Date.parse(seconds);
+      if (Number.isFinite(at)) waitMs = at - now;
+    }
+  }
+  if (!(waitMs > 0)) return undefined;
+  return now + Math.min(waitMs, RETRY_AFTER_MAX_MS);
+}
+
 export class OpenCodeExecutor extends BaseExecutor {
   constructor() {
     super("opencode", PROVIDERS.opencode);
@@ -469,7 +506,7 @@ export class OpenCodeExecutor extends BaseExecutor {
     return {
       status,
       message: text.slice(0, 300) || `OpenCode free limit (${status})`,
-      poolScoped: { reason },
+      poolScoped: { reason, until: retryAfterUntil(response?.headers) },
     };
   }
 }

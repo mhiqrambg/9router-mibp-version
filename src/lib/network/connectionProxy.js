@@ -30,6 +30,9 @@ export function pickProxyPoolId(poolIds, strategy, providerId, opts = {}) {
   if (strategy === "smart" && scope) eligible = fitPoolIds(eligible, scope);
 
   if (eligible.length === 0) {
+    // Nothing left in this request's retry chain: every pool already failed.
+    // Returning one of them would just replay the same upstream error.
+    if (excludeIds?.length) return null;
     // Freebuff must never reuse a limited-IP egress. Other providers retain
     // the previous fail-open behavior when every smart candidate is marked
     // unfit; their executors may have their own pool fallback semantics.
@@ -157,6 +160,22 @@ export async function resolveConnectionProxyConfig(
         }
       }
     }
+    // The request is on a pool retry and every candidate is excluded. Falling
+    // through would resurrect the legacy single-pool proxy (often the pool that
+    // just failed) and silently undo the rotation.
+    if (!selectedPoolId && excludePoolIds?.length) {
+      return {
+        source: "none",
+        proxyPoolId: null,
+        proxyPool: null,
+        noFitPool: true,
+        connectionProxyEnabled: false,
+        connectionProxyUrl: "",
+        connectionNoProxy: "",
+        strictProxy: true,
+      };
+    }
+
     if (
       !selectedPoolId &&
       proxyRotationStrategy === "smart" &&

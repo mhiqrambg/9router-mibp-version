@@ -35,9 +35,21 @@ import { resolveSessionId } from "../utils/sessionManager.js";
 import { markPoolUnfit, clearPoolUnfit } from "../services/proxyPoolFitness.js";
 
 // Pool-scoped failure retry: when an executor tags an error as belonging to a
-// proxy pool (region gate, dead proxy, …), re-resolve the proxy config
-// excluding that pool and retry instead of failing the whole account.
-const MAX_POOL_RETRIES = 2;
+// proxy pool (region gate, dead proxy, per-IP quota …), re-resolve the proxy
+// config excluding every pool that already failed for this request and retry
+// instead of failing the whole account.
+//
+// The budget follows the candidate pool list: one attempt per pool, capped so a
+// large pool list cannot turn a single request into a long retry storm. A
+// provider without a pool list keeps the historical 3-attempt behavior.
+const DEFAULT_POOL_ATTEMPTS = 3;
+const MAX_POOL_ATTEMPTS = 6;
+
+function poolAttemptBudget(credentials) {
+  const poolIds = credentials?.providerSpecificData?.proxyPoolIds;
+  const candidates = Array.isArray(poolIds) ? poolIds.length : 0;
+  return Math.min(candidates || DEFAULT_POOL_ATTEMPTS, MAX_POOL_ATTEMPTS);
+}
 
 /**
  * Core chat handler - shared between SSE and Worker
@@ -416,17 +428,23 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   // (executor.execute) and non-ok responses declared poolScoped via
   // parseError — poolId/scope are completed here from proxyOptions.
   let parsedNonOk = null;
+  const maxPoolAttempts = poolAttemptBudget(credentials);
+  const triedPoolIds = [];
 
   const tryNextPool = async (poolScoped, reasonMsg) => {
     const failed = {
       poolId: poolScoped?.poolId || proxyOptions.proxyPoolId || null,
       scope: poolScoped?.scope || proxyScope,
+      until: poolScoped?.until,
       reason: poolScoped?.reason || "pool-scoped",
     };
-    markPoolUnfit(failed.poolId, failed.scope, undefined, failed.reason);
+    if (failed.poolId && !triedPoolIds.includes(failed.poolId)) triedPoolIds.push(failed.poolId);
+    markPoolUnfit(failed.poolId, failed.scope, failed.until, failed.reason);
     log?.warn?.("PROXY", `${provider.toUpperCase()} | pool ${failed.poolId || "?"} unfit for ${failed.scope} (${failed.reason}) — retry with another pool. ${reasonMsg || ""}`);
     try {
-      const resolved = await resolveProxyConfig(credentials, [failed.poolId]);
+      // Exclude every pool that failed for this request, not just the last one:
+      // otherwise a rotating provider can hand the same dead pool back.
+      const resolved = await resolveProxyConfig(credentials, triedPoolIds.slice());
       if (resolved?.proxyPoolId) {
         credentials.providerSpecificData = { ...(credentials.providerSpecificData || {}), ...resolved };
         proxyOptions = buildProxyOptions(credentials.providerSpecificData);
@@ -444,7 +462,7 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     try {
       result = await executor.execute({ model, body: translatedBody, stream, credentials, providerSessionId: sessionSeed, clientTool, signal: streamController.signal, log, proxyOptions, providerOverrides });
     } catch (error) {
-      if (error?.poolScoped && typeof resolveProxyConfig === "function" && attempt < MAX_POOL_RETRIES) {
+      if (error?.poolScoped && typeof resolveProxyConfig === "function" && attempt + 1 < maxPoolAttempts) {
         if (await tryNextPool(error.poolScoped, error.message)) return executeWithPoolFallback(attempt + 1);
       }
       throw error;
@@ -453,7 +471,7 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     // free per-IP limit) — parse once, retry via another pool when possible.
     if (!result.response.ok) {
       const parsed = await parseUpstreamError(result.response, executor);
-      if (parsed.poolScoped && typeof resolveProxyConfig === "function" && attempt < MAX_POOL_RETRIES) {
+      if (parsed.poolScoped && typeof resolveProxyConfig === "function" && attempt + 1 < maxPoolAttempts) {
         if (await tryNextPool(parsed.poolScoped, parsed.message)) return executeWithPoolFallback(attempt + 1);
       }
       parsedNonOk = parsed;
