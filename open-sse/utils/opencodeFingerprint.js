@@ -270,11 +270,42 @@ export function takeRenamedToolNames(body) {
 
 // Response side -------------------------------------------------------------
 
+/** Concealment suffix added by concealFingerprintToolNames (`read_client`, `read_client2`). */
+const CLIENT_ALIAS_RE = /^(.+)_client(\d*)$/;
+
+/**
+ * Resolve a sent tool name back to the caller's spelling: the per-request map
+ * first, then the concealment suffix. The suffix fallback covers requests whose
+ * map never reached the response side (passthrough SSE streams) and maps lost
+ * across a retry/reconnect. Only fingerprint names are stripped, so an unrelated
+ * `foo_client` tool is never rewritten.
+ */
+function restoredToolName(name, map) {
+  if (typeof name !== "string") return null;
+  const mapped = map?.get?.(name);
+  if (typeof mapped === "string") return mapped;
+  const match = CLIENT_ALIAS_RE.exec(name);
+  return match ? fingerprintToolKey(match[1]) || null : null;
+}
+
+/** Answer `has`/`get` from the map, falling back to the concealment suffix. */
+function withClientAliasFallback(map) {
+  if (map?.isClientAliasFallback) return map;
+  return {
+    isClientAliasFallback: true,
+    has: (name) => restoredToolName(name, map) !== null,
+    get: (name) => restoredToolName(name, map),
+  };
+}
+
 /** Restore caller tool spellings in supported response/event shapes. */
 export function restoreToolNames(payload, map) {
-  if (!map?.size || !payload) return payload;
+  if (!payload) return payload;
   if (Array.isArray(payload)) return payload.map((item) => restoreToolNames(item, map));
   if (typeof payload !== "object") return payload;
+
+  // Every lookup below goes through the fallback so a missing map is not fatal.
+  map = withClientAliasFallback(map);
 
   let out = payload;
   const put = (key, value) => {
@@ -292,15 +323,16 @@ export function restoreToolNames(payload, map) {
 
   // Claude non-streaming message body.
   if (Array.isArray(payload.content)) {
-    put("content", payload.content.map((block) =>
+    const blocks = payload.content.map((block) =>
       block?.type === "tool_use" && typeof block.name === "string" && map.has(block.name)
         ? { ...block, name: map.get(block.name) }
-        : block));
+        : block);
+    if (blocks.some((block, index) => block !== payload.content[index])) put("content", blocks);
   }
 
   // OpenAI Chat Completions, both streaming delta and JSON message shapes.
   if (Array.isArray(payload.choices)) {
-    put("choices", payload.choices.map((choice) => {
+    const choices = payload.choices.map((choice) => {
       let changed = false;
       const next = { ...choice };
       for (const holder of ["delta", "message"]) {
@@ -317,15 +349,17 @@ export function restoreToolNames(payload, map) {
         next[holder] = { ...value, tool_calls: calls };
       }
       return changed ? next : choice;
-    }));
+    });
+    if (choices.some((choice, index) => choice !== payload.choices[index])) put("choices", choices);
   }
 
   // OpenAI Responses final JSON body.
   if (Array.isArray(payload.output)) {
-    put("output", payload.output.map((item) =>
+    const output = payload.output.map((item) =>
       item?.type === "function_call" && typeof item.name === "string" && map.has(item.name)
         ? { ...item, name: map.get(item.name) }
-        : item));
+        : item);
+    if (output.some((item, index) => item !== payload.output[index])) put("output", output);
   }
 
   // OpenAI Responses SSE events such as response.output_item.added/done.

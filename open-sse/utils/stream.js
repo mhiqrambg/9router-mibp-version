@@ -5,6 +5,7 @@ import { extractUsage, mergeUsage, hasValidUsage, estimateUsage, logUsage, addBu
 import { parseSSELine, hasValuableContent, fixInvalidId, formatSSE } from "./streamHelpers.js";
 import { getOpenAIResponsesEventName, isOpenAIResponsesTerminalEvent, formatIncompleteOpenAIResponsesStreamFailure } from "./responsesStreamHelpers.js";
 import { dbg, isDebugEnabled } from "./debugLog.js";
+import { restoreToolNames } from "./opencodeFingerprint.js";
 
 import { SSE_DONE, SSE_HEADERS, SSE_HEADERS_NO_BUFFER } from "./sseConstants.js";
 
@@ -166,7 +167,15 @@ export function createSSEStream(options = {}) {
 
           if (trimmed.startsWith("data:") && trimmed.slice(5).trim() !== "[DONE]") {
             try {
-              const parsed = JSON.parse(trimmed.slice(5).trim());
+              // Undo the OpenCode fingerprint tool renames — passthrough forwards
+              // upstream deltas verbatim, so the alias would otherwise reach the
+              // client (`read_client`) while only `read` exists there.
+              let parsed = JSON.parse(trimmed.slice(5).trim());
+              const restored = restoreToolNames(parsed, toolNameMap);
+              // restoreToolNames clones the payload only when it rewrites a name, so an
+              // identity change means "emit the re-serialized chunk, not the raw line".
+              const namesRestored = restored !== parsed;
+              parsed = restored;
 
               const idFixed = fixInvalidId(parsed);
 
@@ -240,7 +249,7 @@ export function createSSEStream(options = {}) {
                 parsed.usage = filterUsageForFormat(buffered, FORMATS.OPENAI);
                 output = `data: ${JSON.stringify(parsed)}\n`;
                 injectedUsage = true;
-              } else if (idFixed || fieldsInjected) {
+              } else if (idFixed || fieldsInjected || namesRestored) {
                 output = `data: ${JSON.stringify(parsed)}\n`;
                 injectedUsage = true;
               }
@@ -551,11 +560,12 @@ export function createSSETransformStreamWithLogger(targetFormat, sourceFormat, p
   });
 }
 
-export function createPassthroughStreamWithLogger(provider = null, reqLogger = null, model = null, connectionId = null, body = null, onStreamComplete = null, apiKey = null) {
+export function createPassthroughStreamWithLogger(provider = null, reqLogger = null, model = null, connectionId = null, body = null, onStreamComplete = null, apiKey = null, toolNameMap = null) {
   return createSSEStream({
     mode: STREAM_MODE.PASSTHROUGH,
     provider,
     reqLogger,
+    toolNameMap,
     model,
     connectionId,
     body,
