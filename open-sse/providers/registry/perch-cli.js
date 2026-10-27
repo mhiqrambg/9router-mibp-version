@@ -11,7 +11,7 @@ export default {
     website: "https://www.perchai.app",
     notice: {
       signupUrl: "https://www.perchai.app/cli",
-      text: "Sign in with Google or GitHub (one connection per account). Install the CLI first: `npm install -g perchai-cli` (the Docker image includes it). A new account must accept the free Starter plan once at https://chat.perchai.app. Roost streams through ACP; a named model runs one buffered turn via `perch run`. Tool approvals are denied unless PERCH_CLI_AUTO_APPROVE=1.",
+      text: "Sign in with Google or GitHub (one connection per account). Install the CLI first: `npm install -g perchai-cli` (the Docker image includes it). A new account must accept the free Starter plan once at https://chat.perchai.app. Roost streams through ACP and works on every plan; a named model runs one buffered turn via `perch run`, but named pins bill a separate manual lane (Starter includes $20) — an account with no remaining manual allowance is blocked by Perch as direct API access, and a blocked account fails fast after one attempt instead of retrying. Tool approvals are denied unless PERCH_CLI_AUTO_APPROVE=1.",
     },
   },
   category: "free",

@@ -152,7 +152,7 @@ function makeFakeRunChild(stdout, { stderr = "", code = 0 } = {}) {
   return child;
 }
 
-async function runPinned(stdout, model = "qwen-3.8-max", runOpts = {}) {
+async function runPinned(stdout, model = "qwen-3.8-max", runOpts = {}, creds = CREDENTIALS) {
   const child = makeFakeRunChild(stdout, runOpts);
   spawnMock.mockReset();
   spawnMock.mockImplementation((bin, args, opts) => {
@@ -166,7 +166,7 @@ async function runPinned(stdout, model = "qwen-3.8-max", runOpts = {}) {
   const { response } = await exec.execute({
     model,
     body: { messages: [{ role: "user", content: "hi" }] },
-    credentials: CREDENTIALS,
+    credentials: creds,
     log: { info() {}, debug() {}, warn: (...a) => warnings.push(a.join(" ")) },
   });
   child.finishRun();
@@ -344,6 +344,25 @@ describe("PerchCliExecutor named model flow", () => {
     });
     expect(acc).toContain("exit 1");
     expect(acc).toContain("Unknown model");
+  });
+
+  it("short-circuits pins after a direct-API block without spawning", async () => {
+    const creds = { ...CREDENTIALS, connectionId: "perch-blocked-conn" };
+    const blocked = JSON.stringify({
+      ok: false,
+      status: "failed",
+      assistantText: "",
+      error:
+        "Your plan includes Perch-hosted models for use in Perch AI Web, Desktop, and CLI only. Direct API access is not included. Repeated direct-access attempts may result in account suspension.",
+      events: [],
+    });
+    const first = await runPinned(blocked, "qwen-3.8-max", {}, creds);
+    expect(first.acc).toContain("Direct API access is not included");
+    spawnMock.mockReset();
+    const second = await runPinned(blocked, "laguna-s", {}, creds);
+    expect(spawnMock).not.toHaveBeenCalled();
+    expect(second.acc).toContain("blocks manual model pins");
+    expect(second.acc).toContain("perch-cli/roost");
   });
 });
 

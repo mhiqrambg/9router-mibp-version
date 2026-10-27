@@ -146,6 +146,16 @@ function parsePerchRunJson(stdout) {
   }
 }
 
+// Connections whose plan the server has refused a manual pin on
+// (`perch_surface_required` — the plan treats named slugs as direct API
+// access). Remembered per process so a blocked account stops after ONE
+// failed attempt instead of risking suspension with repeats. Roost (ACP)
+// is unaffected and keeps working.
+const PIN_BLOCKED = new Set();
+const PIN_BLOCK_RE = /direct API access is not included|perch_surface_required/i;
+const PIN_BLOCKED_MSG =
+  "This Perch account's plan blocks manual model pins (Perch counts named models as direct API access). Use perch-cli/roost instead.";
+
 // Last failing model/turn event, if any — surfaced instead of a generic
 // "empty reply" when the CLI ran but produced no text (e.g. quota/route
 // failure recorded in events while `ok` stayed truthy).
@@ -309,6 +319,17 @@ export class PerchCliExecutor extends BaseExecutor {
         // `perch run` turn: same account/session, JSON output instead of SSE.
         // Each request gets its own thread id so threads never share history.
         if (pinnedModel) {
+          const pinKey = String(credentials.connectionId || "default");
+          if (PIN_BLOCKED.has(pinKey)) {
+            // Plan already refused a pin on this connection — fail without
+            // spawning so this attempt can't count toward suspension.
+            emit(
+              `data: ${JSON.stringify({ error: { message: PIN_BLOCKED_MSG, type: "perch_cli_error" } })}\n\n`
+            );
+            emit("data: [DONE]\n\n");
+            controller.close();
+            return;
+          }
           const threadId = `9router-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
           child = spawn(
             perchBin,
@@ -362,6 +383,7 @@ export class PerchCliExecutor extends BaseExecutor {
             // A finish(error) emits an error chunk with no usage, so combo
             // logs show only "empty (no-content)". Log the cause server-side.
             const fail = (message) => {
+              if (PIN_BLOCK_RE.test(message)) PIN_BLOCKED.add(pinKey);
               log?.warn?.(
                 "PERCH",
                 `run --model ${pinnedModel} failed: ${message} (status=${parsed?.status ?? "?"}, exit=${code}${stderrTail ? `, stderr=${stderrTail}` : ""})`
