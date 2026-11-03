@@ -69,7 +69,9 @@ export class CodeBuddyIntlExecutor extends DefaultExecutor {
     headers["X-Conversation-ID"] = conversationKey
       ? stableUuidFrom(conversationKey)
       : randomUUID();
-    headers["X-Conversation-Request-ID"] = randomUUID();
+    // Same request id across the request/conversation pair (upstream contract:
+    // X-Request-ID === X-Conversation-Request-ID; only the message id is fresh).
+    headers["X-Conversation-Request-ID"] = headers["X-Request-ID"] || randomUUID();
     headers["X-Conversation-Message-ID"] = randomUUID();
 
     return headers;
