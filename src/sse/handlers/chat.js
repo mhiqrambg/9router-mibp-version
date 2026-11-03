@@ -27,7 +27,7 @@ import * as log from "../utils/logger.js";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
 import { getProjectIdForConnection } from "open-sse/services/projectId.js";
 import { stripModelContextMarker } from "open-sse/utils/modelMarkers.js";
-import { getKeyAccessContext, enforceKeyAccess, filterAdapterModels } from "../services/keyAccess.js";
+import { getKeyAccessContext, enforceKeyAccess, filterAdapterModels, enforceCombosOnly } from "../services/keyAccess.js";
 import { resolveSmartChoice } from "../services/systemoneRouter.js";
 
 /**
@@ -109,6 +109,8 @@ export async function handleChat(request, clientRawRequest = null) {
 
   // Check if model is a combo (has multiple models with fallback)
   const comboModels = await getComboModels(modelStr);
+  const combosOnlyDenied = enforceCombosOnly(modelStr, comboModels, settings);
+  if (combosOnlyDenied) return combosOnlyDenied;
   if (comboModels) {
     // Check for combo-specific strategy first, fallback to global
     const comboStrategies = settings.comboStrategies || {};

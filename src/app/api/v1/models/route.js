@@ -7,9 +7,9 @@ import {
   isAnthropicCompatibleProvider,
   isOpenAICompatibleProvider,
 } from "@/shared/constants/providers";
-import { getProviderConnections, getCombos, getCustomModels, getModelAliases } from "@/lib/localDb";
+import { getProviderConnections, getCombos, getCustomModels, getModelAliases, getSettings } from "@/lib/localDb";
 import { getDisabledModels } from "@/lib/disabledModelsDb";
-import { getKeyAccessContext, filterModelsListForKey } from "@/sse/services/keyAccess.js";
+import { getKeyAccessContext, filterModelsListForKey, shouldApplyCombosOnly } from "@/sse/services/keyAccess.js";
 import { resolveKiroModels } from "open-sse/services/kiroModels.js";
 import { resolveKimchiModels } from "open-sse/services/kimchiModels.js";
 import { resolveQoderModels, routableQoderModels } from "open-sse/services/qoderModels.js";
@@ -409,6 +409,14 @@ export async function buildModelsList(kindFilter, options = {}) {
     }
     models.push(entry);
   }
+
+  // Combos-only mode: expose just combos for LLM + web kinds. Media kinds
+  // without combo creation UI stay untouched. shortcut: per-kind allowlist,
+  // widen COMBOS_ONLY_KINDS in keyAccess.js if more kinds gain combo UI.
+  try {
+    const s = await getSettings();
+    if (shouldApplyCombosOnly(kindFilter, s)) return models;
+  } catch {}
 
   if (connections.length === 0) {
     // DB unavailable -> return static models, filtered by per-model kind

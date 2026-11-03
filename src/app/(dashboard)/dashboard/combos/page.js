@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import { useState, useEffect } from "react";
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
@@ -84,7 +86,7 @@ export default function CombosPage() {
 
   useEffect(() => {
     fetchData();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   // Drop stale selection when the combo list changes (delete / refresh).
   useEffect(() => {

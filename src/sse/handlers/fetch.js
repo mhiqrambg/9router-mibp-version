@@ -13,7 +13,7 @@ import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
 import * as log from "../utils/logger.js";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
 import { handleComboChat, getComboModelsFromData } from "open-sse/services/combo.js";
-import { getKeyAccessContext, enforceKeyAccessProvider } from "../services/keyAccess.js";
+import { getKeyAccessContext, enforceKeyAccessProvider, enforceCombosOnly } from "../services/keyAccess.js";
 import { assertPublicUrlResolved } from "@/shared/utils/ssrfGuard.js";
 
 /**
@@ -97,6 +97,8 @@ export async function handleFetch(request) {
   // restricted key needs the provider id (or the combo) on its list.
   const keyAccessDenied = await enforceKeyAccessProvider(await getKeyAccessContext(request), providerInput, comboModels);
   if (keyAccessDenied) return keyAccessDenied;
+  const combosOnlyDenied = enforceCombosOnly(providerInput, comboModels, settings);
+  if (combosOnlyDenied) return combosOnlyDenied;
   if (comboModels) {
     const comboStrategies = settings.comboStrategies || {};
     const comboStrategy = comboStrategies[providerInput]?.fallbackStrategy || settings.comboStrategy || "fallback";

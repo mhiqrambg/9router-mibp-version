@@ -948,7 +948,7 @@ export default function ProxyPoolsPage() {
             value={cloudflareForm.apiToken}
             onChange={(e) => setCloudflareForm((prev) => ({ ...prev, apiToken: e.target.value }))}
             placeholder="your-cloudflare-api-token"
-            hint={<>Requires "Workers Scripts: Edit" permission. <a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">Get token →</a></>}
+            hint={<>Requires &quot;Workers Scripts: Edit&quot; permission. <a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">Get token →</a></>}
             type="password"
           />
           <Input

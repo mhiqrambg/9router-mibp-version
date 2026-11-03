@@ -197,3 +197,37 @@ export async function filterModelsListForKey(ctx, list) {
   }
   return out;
 }
+
+// Global combos-only mode: when settings.combosOnly is true, only combo names
+// may be called. Raw provider/model ids are hidden from listing and rejected
+// at execution, even for unrestricted keys. Checked once on the requested
+// target, before combo expansion — an allowed combo still grants its members.
+export function isCombosOnlyEnabled(settings) {
+  return settings?.combosOnly === true;
+}
+
+// Combos-only applies to LLM + web kinds (the ones with combo UI). Media
+// kinds without combo creation UI (image/tts/stt/embedding/...) stay untouched.
+const COMBOS_ONLY_KINDS = new Set(["llm", "webSearch", "webFetch"]);
+
+export function shouldApplyCombosOnly(kindFilter, settings) {
+  if (!isCombosOnlyEnabled(settings)) return false;
+  if (!Array.isArray(kindFilter) || kindFilter.length === 0) return false;
+  return kindFilter.every((k) => COMBOS_ONLY_KINDS.has(k));
+}
+
+export function combosOnlyDeniedResponse(requested) {
+  const id = String(requested ?? "");
+  return errorResponse(
+    HTTP_STATUS.NOT_FOUND,
+    `The model '${id}' does not exist or you do not have access to it.`,
+  );
+}
+
+/** Gate for combo-capable endpoints (chat, image, tts, search/fetch via comboModels). */
+export function enforceCombosOnly(requested, comboModels, settings) {
+  if (!isCombosOnlyEnabled(settings)) return null;
+  if (comboModels) return null;
+  log.warn("AUTH", `combos-only: denied "${requested}" (not a combo)`);
+  return combosOnlyDeniedResponse(requested);
+}
