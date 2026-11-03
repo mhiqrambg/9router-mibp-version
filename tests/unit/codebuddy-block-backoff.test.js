@@ -87,7 +87,7 @@ describe("CodeBuddy Intl block backoff (#5024)", () => {
 
   // A request-scoped 4xx no longer ends the combo: every member is tried, and
   // the first request-scoped failure is returned when none can serve it.
-  it("still returns a malformed CodeBuddy request error after trying every member", async () => {
+  it("advances past a malformed CodeBuddy request without cooling the account", async () => {
     const error = Response.json({ error: { message: "first message is not system prompt" } }, { status: 400 });
     const dispatch = vi.fn().mockResolvedValue(error);
     const result = await handleComboChat({
@@ -95,8 +95,14 @@ describe("CodeBuddy Intl block backoff (#5024)", () => {
       handleSingleModel: dispatch, log: { info: vi.fn(), warn: vi.fn() },
       comboName: "malformed-combo", comboStrategy: "fallback",
     });
+    // A malformed body is request-scoped: it says nothing about the credential,
+    // so the combo tries the next member instead of stopping on the first error.
+    expect(dispatch).toHaveBeenCalledTimes(2);
+    // No member served it, so the first request-scoped failure is handed back —
+    // the caller still sees the member that named the real cause.
     expect(result).toBe(error);
     expect(dispatch).toHaveBeenCalledTimes(2);
+    // Crucially, no account cooldown is persisted for a client-side fault.
     expect(db.updateProviderConnection).not.toHaveBeenCalled();
   });
 });
