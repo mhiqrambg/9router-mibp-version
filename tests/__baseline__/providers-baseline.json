@@ -769,7 +769,6 @@
     "forceStream": true,
     "format": "openai"
   },
-  },
   "nous": {
     "baseUrl": "https://inference-api.nousresearch.com/v1/chat/completions",
     "format": "openai",
