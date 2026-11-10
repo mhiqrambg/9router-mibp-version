@@ -35,7 +35,6 @@ import WindsurfExecutor from "./windsurf.js";
 import { DefaultExecutor } from "./default.js";
 import { MinimaxCodeExecutor } from "./minimax-code.js";
 import { DevinCliExecutor } from "./devin-cli.js";
-import { PerchCliExecutor } from "./perch-cli.js";
 import { FreebuffExecutor } from "./freebuff.js";
 
 const executors = {
@@ -82,7 +81,6 @@ const executors = {
   "minimax-code": new MinimaxCodeExecutor("minimax-code"),
   "minimax-code-global": new MinimaxCodeExecutor("minimax-code-global"),
   "devin-cli": new DevinCliExecutor(),
-  "perch-cli": new PerchCliExecutor(),
   freebuff: new FreebuffExecutor(),
   bedrock: new BedrockExecutor(),
   br: new BedrockExecutor(), // Alias for bedrock
@@ -140,4 +138,3 @@ export { default as TraeExecutor } from "./trae.js";
 export { default as ZedExecutor } from "./zed.js";
 export { default as WindsurfExecutor } from "./windsurf.js";
 export { DevinCliExecutor } from "./devin-cli.js";
-export { PerchCliExecutor } from "./perch-cli.js";

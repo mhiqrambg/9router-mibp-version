@@ -1,4 +1,4 @@
-// Shared ACP prompt flattening for CLI providers (devin-cli, perch-cli).
+// Shared ACP prompt flattening for CLI providers (devin-cli).
 // ACP takes a single prompt turn, so the whole conversation — including prior
 // tool_calls / tool_results — is inlined as text.
 

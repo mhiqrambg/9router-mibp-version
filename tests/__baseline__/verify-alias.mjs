@@ -23,7 +23,6 @@ const ALIAS_TOKENS = [
   "af","airforce","api-airforce","llm7","llm-7","samba","sambanova","bm","bluesminds",
   "bzl","bazaarlink","kgw","kilo-gateway","hunyuan","tencent","qianfan","baidu","ernie",
   "dv","devin","devin-cli","morph","morphllm",
-  "perch","perchai","perch-ai","perch-cli",
   "muse","muse-ai","meta-model-api",
   "muse-code","muse-subscription",
   "br","bedrock","aws-bedrock",

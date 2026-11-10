@@ -24,10 +24,6 @@ export const CLAUDE_CONFIG = { ...PROVIDER_OAUTH["claude"] };
 // Codex (OpenAI) OAuth Configuration (Authorization Code Flow with PKCE)
 export const CODEX_CONFIG = { ...PROVIDER_OAUTH["codex"] };
 
-// Perch CLI OAuth — Perch's own login is Supabase Auth (PKCE); the Supabase
-// project + publishable key are fetched at runtime from Perch's config endpoint.
-export const PERCH_CONFIG = { ...PROVIDER_OAUTH["perch-cli"] };
-
 // Gemini (Google) OAuth Configuration (Standard OAuth2)
 // clientId/clientSecret from GOOGLE_OAUTH_CLIENT (shared.js) — not stored in registry
 export const GEMINI_CONFIG = { ...GOOGLE_OAUTH_CLIENT, ...PROVIDER_OAUTH["gemini-cli"] };

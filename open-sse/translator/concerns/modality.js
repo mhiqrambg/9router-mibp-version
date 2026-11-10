@@ -44,6 +44,73 @@ function capForClaudeBlock(block) {
   return null;
 }
 
+// Truncated/placeholder data URIs inside plain STRING content. Some upstream
+// lanes reject the whole request when the text merely *mentions* an image
+// payload — e.g. a JSDoc `data:image/jpeg;base64,...` inside a tool result
+// carrying source code (probed: even a bare `data:image/` prefix 400s).
+// Redact the mention, keep surrounding text. Only mention-like tokens match:
+// `...` payloads or payloads shorter than a real thumbnail — a genuine
+// base64 payload (hundreds of chars) is left alone so vision routing and
+// real image inputs keep working. Applies regardless of model capability:
+// a truncated mention is never a viewable image for any model.
+const MENTION_DATA_URI = [
+  { cap: "vision", re: /data:image\/[A-Za-z0-9+.-]+;base64,(?:\.\.\.|[A-Za-z0-9+/=]{0,64}(?![A-Za-z0-9+/=]))/gi },
+  { cap: "audioInput", re: /data:audio\/[A-Za-z0-9+.-]+;base64,(?:\.\.\.|[A-Za-z0-9+/=]{0,64}(?![A-Za-z0-9+/=]))/gi },
+  { cap: "pdf", re: /data:application\/pdf(?:;[A-Za-z0-9+.-]+)?;base64,(?:\.\.\.|[A-Za-z0-9+/=]{0,64}(?![A-Za-z0-9+/=]))/gi },
+];
+
+function redactEmbeddedDataUris(text, isLast) {
+  let out = text;
+  for (const { cap, re } of MENTION_DATA_URI) {
+    const next = out.replace(re, ph(cap, isLast));
+    if (next !== out) out = next;
+  }
+  return out;
+}
+
+// Mention redaction across request shapes. Runs for every model — before the
+// capability fast-exit in stripUnsupportedModalities: a truncated mention is
+// never a viewable image, and strict upstream lanes 400 on the mere
+// substring. Genuine payloads (blocks, long base64) are untouched, so vision
+// routing (which scans the pre-strip body) and real image inputs keep working.
+function redactMentionStrings(body, sourceFormat) {
+  const redactMessages = (messages) => {
+    if (!Array.isArray(messages)) return;
+    const last = messages.length - 1;
+    messages.forEach((msg, i) => {
+      if (msg && typeof msg.content === "string") msg.content = redactEmbeddedDataUris(msg.content, i === last);
+    });
+  };
+  const redactParts = (contents, getParts) => {
+    if (!Array.isArray(contents)) return;
+    const last = contents.length - 1;
+    contents.forEach((c, i) => {
+      const parts = getParts(c);
+      if (!Array.isArray(parts)) return;
+      parts.forEach((p) => {
+        if (p && typeof p.text === "string") p.text = redactEmbeddedDataUris(p.text, i === last);
+      });
+    });
+  };
+  switch (sourceFormat) {
+    case FORMATS.OPENAI_RESPONSES:
+    case FORMATS.OPENAI_RESPONSE:
+    case FORMATS.CODEX:
+      redactParts(body.input, (item) => item?.content?.filter?.((b) => b?.type === "input_text"));
+      return;
+    case FORMATS.GEMINI:
+    case FORMATS.GEMINI_CLI:
+    case FORMATS.VERTEX:
+      redactParts(body.contents, (c) => c?.parts);
+      return;
+    case FORMATS.ANTIGRAVITY:
+      redactParts(body?.request?.contents, (c) => c?.parts);
+      return;
+    default:
+      redactMessages(body.messages);
+  }
+}
+
 // Filter an array of content blocks; drop unsupported, inject one placeholder per kind.
 // isLast = block belongs to the current user turn (picks the explanatory placeholder).
 function filterBlocks(blocks, capOf, caps, removed, isLast) {
@@ -134,7 +201,8 @@ function stripGeminiParts(contents, caps) {
  */
 export function stripUnsupportedModalities(body, sourceFormat, caps) {
   if (!body || !caps) return false;
-  // Fast exit: model supports everything we'd strip.
+  // Mention redaction first (capability-independent); fast exit only skips block-level strip.
+  redactMentionStrings(body, sourceFormat);
   if (caps.vision !== false && caps.audioInput !== false && caps.pdf !== false) return false;
 
   switch (sourceFormat) {

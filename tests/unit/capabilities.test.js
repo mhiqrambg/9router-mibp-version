@@ -19,6 +19,10 @@ describe("getCapabilitiesForModel", () => {
     });
     // the superseded text-only Flash id stays text-only
     expect(getCapabilitiesForModel("opencode-go", "deepseek-v4-flash").vision).toBe(false);
+    // deepseek-v4.1-flash-1017:flex inherits vision from *deepseek-v4.** —
+    // probed live: it answers a real image_url block correctly, so the id
+    // must keep vision:true or the strip would eat working image inputs.
+    expect(getCapabilitiesForModel(undefined, "deepseek-v4.1-flash-1017:flex").vision).toBe(true);
   });
   const claudeSonnet5Expected = {
     contextWindow: 1000000,

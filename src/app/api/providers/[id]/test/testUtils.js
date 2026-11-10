@@ -163,10 +163,6 @@ const OAUTH_TEST_CONFIG = {
       403: "Connected, but Freebuff is gated (403) — country blocked or account banned.",
     },
   },
-  // Perch CLI — the access token is a Supabase JWT. Probing /auth/v1/user
-  // needs the per-connection project URL, so just verify expiry and refresh
-  // when due (same refresh path the chat request uses).
-  "perch-cli": { checkExpiry: true, refreshable: true },
   // Grok CLI / Grok Build — probe /v1/user (no inference quota). Headers mirror official CLI.
   "grok-cli": {    url: PROVIDERS["grok-cli"]?.userUrl || "https://cli-chat-proxy.grok.com/v1/user",
     method: "GET",

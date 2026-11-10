@@ -19,7 +19,6 @@ import {
   refreshWindsurfToken,
   refreshMiniMaxCodeToken,
   refreshNousToken,
-  refreshPerchToken,
   classifyOAuthRefreshError,
 } from "./tokenRefresh/providers.js";
 
@@ -42,7 +41,6 @@ export {
   refreshWindsurfToken,
   refreshMiniMaxCodeToken,
   refreshNousToken,
-  refreshPerchToken,
   classifyOAuthRefreshError,
 };
 
@@ -166,7 +164,6 @@ const REFRESH_HANDLERS = {
   "minimax-code": (c, log) => refreshMiniMaxCodeToken("minimax-code", c.refreshToken, log),
   "minimax-code-global": (c, log) => refreshMiniMaxCodeToken("minimax-code-global", c.refreshToken, log),
   nous: (c, log) => refreshNousToken(c.refreshToken, log),
-  "perch-cli": (c, log) => refreshPerchToken(c.refreshToken, c, log),
   vertex: vertexRefreshHandler,
   "vertex-partner": vertexRefreshHandler
 };

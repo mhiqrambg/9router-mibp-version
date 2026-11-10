@@ -486,10 +486,6 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
         redirectUri = "http://localhost:1455/auth/callback";
       } else if (provider === "xai") {
         redirectUri = "http://127.0.0.1:56121/callback";
-      } else if (provider === "perch-cli") {
-        // GoTrue (Perch's Supabase auth) accepts any loopback IP regardless of
-        // port, but NOT the `localhost` hostname — so use the IP form.
-        redirectUri = `http://127.0.0.1:${appPort}/callback`;
       } else {
         redirectUri = `http://localhost:${appPort}/callback`;
       }

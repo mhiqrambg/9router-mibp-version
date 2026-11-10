@@ -37,15 +37,6 @@ function CallbackContent() {
       window.location.origin, // Same origin (for most providers)
       "http://localhost:1455", // Codex specific port
     ];
-    // Perch redirects to 127.0.0.1 while the dashboard may be open on
-    // localhost (or vice versa). Same loopback app, same port — relay to both
-    // spellings so the popup reaches its opener.
-    if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
-      const port = window.location.port ? `:${window.location.port}` : "";
-      for (const host of ["localhost", "127.0.0.1"]) {
-        expectedOrigins.push(`${window.location.protocol}//${host}${port}`);
-      }
-    }
 
     // Method 1: postMessage to opener (popup mode)
     // Send once per expected origin. The browser delivers the message only

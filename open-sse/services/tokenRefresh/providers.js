@@ -82,51 +82,6 @@ function buildRefreshBody(profile, config, refreshToken) {
   return { format: "form", body: new URLSearchParams(payload) };
 }
 
-// Perch CLI — Supabase Auth. Refresh is JSON + `apikey` header, unlike the
-// default form-encoded OAuth2 path; the project/anon key come from the login
-// (providerSpecificData) so a rotated Supabase project keeps working.
-export async function refreshPerchToken(refreshToken, credentials, log) {
-  if (!refreshToken) return null;
-  const cfg = PROVIDER_OAUTH["perch-cli"] || {};
-  const supabaseUrl = credentials?.providerSpecificData?.supabaseUrl || cfg.supabaseUrl;
-  const anonKey = credentials?.providerSpecificData?.anonKey || cfg.anonKey;
-  if (!supabaseUrl || !anonKey) return null;
-
-  return dedupRefresh("perch-cli", refreshToken, async () => {
-    try {
-      const response = await fetch(`${supabaseUrl}/auth/v1/token?grant_type=refresh_token`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-          apikey: anonKey,
-        },
-        body: JSON.stringify({ refresh_token: refreshToken }),
-      });
-
-      const data = await response.json().catch(() => null);
-      if (!response.ok) {
-        log?.warn?.("TOKEN_REFRESH", `Perch refresh failed: ${data?.msg || response.status}`);
-        // 400/401 = refresh token revoked or already rotated → re-login, don't retry.
-        return response.status === 400 || response.status === 401 ? { error: "invalid_grant" } : null;
-      }
-
-      return {
-        accessToken: data.access_token,
-        refreshToken: data.refresh_token || refreshToken,
-        expiresIn: data.expires_in,
-        providerSpecificData: {
-          ...(data.user?.id ? { userId: data.user.id } : {}),
-          ...(data.user?.email ? { email: data.user.email } : {}),
-        },
-      };
-    } catch (error) {
-      log?.warn?.("TOKEN_REFRESH", `Perch refresh error: ${error.message}`);
-      return null;
-    }
-  }, log);
-}
-
 export async function refreshAccessToken(provider, refreshToken, credentials, log) {
   const config = PROVIDERS[provider];
   const profile = REFRESH_PROFILES[provider] || {};
