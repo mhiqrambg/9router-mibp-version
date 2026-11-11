@@ -111,6 +111,24 @@ function blockLength(content) {
   return 0;
 }
 
+// Chat and Responses shapes keep an assistant turn and its tool result as two
+// separate messages. Dropping one side turns a valid history into an orphaned
+// tool output, which strict upstreams reject with "No tool call found for
+// function call output with call_id ..." (cx/Codex and other Responses lanes).
+const isAssistantTurn = (m) =>
+  m?.role === "assistant" || m?.role === "model" || m?.type === "function_call";
+const isToolTurn = (m) =>
+  m?.role === "tool" || m?.role === "function" || m?.type === "function_call_output";
+function callIdsOf(m) {
+  const ids = [];
+  for (const tc of m?.tool_calls || []) if (tc?.id) ids.push(tc.id);
+  if (m?.type === "function_call" && m?.call_id) ids.push(m.call_id);
+  return ids;
+}
+function toolCallIdOf(m) {
+  return m?.tool_call_id || m?.call_id || "";
+}
+
 // Trim history to fit a (possibly smaller) context window by dropping the MIDDLE.
 // Preserves: all system/instruction messages (head), and the trailing user run
 // carrying the media the switch happened for (tail). Older middle turns between
@@ -124,35 +142,55 @@ export function stripHistoryForContext(body, contextWindow) {
   const arr = body[key];
   if (!arr || arr.length === 0) return body;
 
+  const contentOf = (m) => m?.content ?? m?.parts;
+  const lengthOf = (m) => blockLength(contentOf(m));
+  // Cap at 80% of the adapter model's context window — leaves room for the response.
+  const budgetChars = (contextWindow || 200000) * 0.8 * CHARS_PER_TOKEN;
+
+  // A history that already fits must pass through untouched. Trimming it anyway
+  // dropped the middle of every conversation longer than HEAD_KEEP, orphaning the
+  // trailing tool result whose assistant turn lived in the discarded span.
+  if (arr.reduce((sum, m) => sum + lengthOf(m), 0) <= budgetChars) return body;
+
   const isSystem = (r) => r === "system" || r === "developer";
   const systemMsgs = arr.filter((m) => isSystem(m?.role));
   const rest = arr.filter((m) => !isSystem(m?.role));
   if (rest.length === 0) return body;
 
-  const isAssistant = (r) => r === "assistant" || r === "model";
   let i = rest.length - 1;
-  while (i >= 0 && !isAssistant(rest[i]?.role)) i--;
-  const tail = rest.slice(i + 1);          // current user turn (has media) — always kept
-  const older = rest.slice(0, i + 1);      // everything before it
-  if (older.length === 0) return body;
+  while (i >= 0 && !isAssistantTurn(rest[i])) i--;
+  if (i < 0) return body;
 
-  const contentOf = (m) => m.content ?? m.parts;
-  // Cap at 80% of the adapter model's context window — leaves room for the response.
-  const budgetChars = (contextWindow || 200000) * 0.8 * CHARS_PER_TOKEN;
+  // Widen the kept tail until every kept tool result still has its call; the
+  // last assistant turn is usually the owner of the trailing tool result.
+  let start = i + 1;
+  const keptCallIds = new Set();
+  for (let k = start; k < rest.length; k++) for (const id of callIdsOf(rest[k])) keptCallIds.add(id);
+  while (start > 0) {
+    const orphaned = rest.slice(start).some((m) =>
+      isToolTurn(m) && toolCallIdOf(m) && !keptCallIds.has(toolCallIdOf(m)));
+    if (!orphaned) break;
+    start -= 1;
+    for (const id of callIdsOf(rest[start])) keptCallIds.add(id);
+  }
+  const tail = rest.slice(start);          // current user run + its tool round — always kept
+  const older = rest.slice(0, start);      // everything before it
+  if (older.length === 0) return body;
 
   // Prefer keeping the first HEAD_KEEP messages (initial instructions/context) verbatim;
   // only trim further if even that exceeds the adapter model's context window.
   const headKept = older.slice(0, HEAD_KEEP);
-  let total = systemMsgs.concat(headKept, tail).reduce((s, m) => s + blockLength(contentOf(m)), 0);
+  let total = systemMsgs.concat(headKept, tail).reduce((s, m) => s + lengthOf(m), 0);
 
   // If head + tail overflow, drop head turns from the end (closest to middle) first.
+  // Popping the suffix never splits a call from its own output: outputs always follow.
   let head = headKept;
   while (total > budgetChars && head.length > 0) {
     const dropped = head.pop();
-    total -= blockLength(contentOf(dropped));
+    total -= lengthOf(dropped);
   }
 
-  if (head.length === older.length) return body;
+  if (head.length === older.length && start === i + 1) return body;
   return { ...body, [key]: [...systemMsgs, ...head, ...tail] };
 }
 
