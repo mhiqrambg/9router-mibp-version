@@ -8,7 +8,7 @@ import { CAPACITY_META, STT_TRANSPORT_META, STT_TRANSPORTS } from "@/shared/cons
 // Capability editor for a model that already exists on the provider page.
 // Mirrors AddCustomModelModal's toggles so an operator can correct a model
 // without deleting and re-adding it (and losing its alias/caps history).
-export default function EditModelCapsModal({ isOpen, record, providerDisplayAlias, onSave, onClose }) {
+export default function EditModelCapsModal({ isOpen, record, fallbackCaps, providerDisplayAlias, onSave, onClose }) {
   const [caps, setCaps] = useState({});
   const [stt, setStt] = useState(false);
   const [transport, setTransport] = useState("");
@@ -16,11 +16,13 @@ export default function EditModelCapsModal({ isOpen, record, providerDisplayAlia
 
   useEffect(() => {
     if (!isOpen) return;
-    setCaps({ ...(record?.caps || {}) });
+    // A model edited for the first time shows what routing currently believes,
+    // so saving without changes cannot silently disable a capability.
+    setCaps({ ...(fallbackCaps || {}), ...(record?.caps || {}) });
     setStt((record?.kind || record?.type) === "stt");
     setTransport(record?.transport || "");
     setSaving(false);
-  }, [isOpen, record]);
+  }, [isOpen, record, fallbackCaps]);
 
   const handleSave = async () => {
     if (saving) return;
@@ -107,10 +109,12 @@ EditModelCapsModal.propTypes = {
     kind: PropTypes.string,
   }),
   providerDisplayAlias: PropTypes.string.isRequired,
+  fallbackCaps: PropTypes.object,
   onSave: PropTypes.func.isRequired,
   onClose: PropTypes.func.isRequired,
 };
 
 EditModelCapsModal.defaultProps = {
   record: null,
+  fallbackCaps: null,
 };

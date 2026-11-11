@@ -2074,6 +2074,7 @@ export default function ProviderDetailPage() {
           ...(customModels.find((m) => m?.id === editingCaps.id && m.providerAlias === providerStorageAlias) || {}),
           id: editingCaps.id,
         } : null}
+        fallbackCaps={editingCaps ? getCaps(`${providerId}/${editingCaps.id}`) : null}
         providerDisplayAlias={providerDisplayAlias}
         onSave={(payload) => handleSaveCustomModel(editingCaps.id, payload)}
         onClose={() => setEditingCaps(null)}
