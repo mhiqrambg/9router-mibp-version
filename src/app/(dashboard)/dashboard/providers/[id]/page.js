@@ -666,26 +666,27 @@ export default function ProviderDetailPage() {
   // toggle) moves the record between the "llm" and "stt" keys, so delete first.
   const handleSaveCustomModel = async (modelId, { type = "llm", previousType = "llm", caps, transport } = {}) => {
     try {
-      if (previousType !== type) {
-        const params = new URLSearchParams({ providerAlias: providerStorageAlias, id: modelId, type: previousType });
-        const del = await fetch(`/api/models/custom?${params}`, { method: "DELETE" });
-        if (!del.ok) {
-          alert("Failed to move model to the new type");
-          return;
-        }
-      }
+      // Write the new type first: a failed delete leaves a duplicate row (the
+      // loader prefers the llm one), while deleting first would lose caps, name
+      // and transport if the POST then failed.
+      const existing = customModels.find((m) => m?.id === modelId && m.providerAlias === providerStorageAlias);
       const res = await fetch("/api/models/custom", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ providerAlias: providerStorageAlias, id: modelId, type, ...(caps ? { caps } : {}), ...(transport ? { transport } : {}) }),
+        body: JSON.stringify({ providerAlias: providerStorageAlias, id: modelId, type, name: existing?.name, ...(caps ? { caps } : {}), ...(transport ? { transport } : {}) }),
       });
-      if (res.ok) {
-        await fetchCustomModels();
-        if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("customModelChanged"));
-      } else {
+      if (!res.ok) {
         const data = await res.json();
         alert(data.error || "Failed to save model capabilities");
+        return;
       }
+      if (previousType !== type) {
+        const params = new URLSearchParams({ providerAlias: providerStorageAlias, id: modelId, type: previousType });
+        const del = await fetch(`/api/models/custom?${params}`, { method: "DELETE" });
+        if (!del.ok) alert("Saved, but the previous type could not be removed");
+      }
+      await fetchCustomModels();
+      if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("customModelChanged"));
     } catch (error) {
       console.log("Error saving model capabilities:", error);
     }
@@ -1297,6 +1298,7 @@ export default function ProviderDetailPage() {
           onAddCustomModel={(modelId) => handleAddCustomModel(modelId, "llm", providerStorageAlias)}
           onDeleteCustomModel={(modelId) => handleDeleteCustomModel(modelId, "llm", providerStorageAlias)}
           onSaveCustomModel={handleSaveCustomModel}
+          resolveCaps={getCaps}
           connections={connections}
           isAnthropic={isAnthropicCompatible}
         />

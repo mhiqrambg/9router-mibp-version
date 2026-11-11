@@ -5,6 +5,7 @@ vi.mock("../../src/lib/localDb.js", () => ({ getCustomModels: vi.fn() }));
 import { getCustomModels } from "../../src/lib/localDb.js";
 import { installModelCapOverrides, refreshModelCapOverrides } from "../../src/lib/modelCaps/overrides.js";
 import { getCapabilitiesForModel, setCustomCapsSource } from "../../open-sse/providers/capabilities.js";
+import { PROVIDER_ID_TO_ALIAS } from "../../open-sse/config/providerModels.js";
 
 const PROVIDER = "openai-compatible-chat-77bd";
 const MODEL = "deepseek-v4.1-flash-1017:flex";
@@ -46,5 +47,22 @@ describe("model capability override loader", () => {
     getCustomModels.mockRejectedValue(new Error("db down"));
     await refreshModelCapOverrides();
     expect(getCapabilitiesForModel(PROVIDER, MODEL).vision).toBe(false);
+  });
+
+  it("matches the canonical provider id request handling passes", async () => {
+    const [providerId, alias] = Object.entries(PROVIDER_ID_TO_ALIAS).find(([id, a]) => a && id !== a);
+    getCustomModels.mockResolvedValue([
+      { providerAlias: alias, id: "edited-model", type: "llm", caps: { vision: false } },
+    ]);
+    await installModelCapOverrides();
+    expect(getCapabilitiesForModel(providerId, "edited-model").vision).toBe(false);
+  });
+
+  it("ignores STT rows so they cannot shadow chat capabilities", async () => {
+    getCustomModels.mockResolvedValue([
+      { providerAlias: PROVIDER, id: "gpt-4o", type: "stt", caps: { vision: false } },
+    ]);
+    await installModelCapOverrides();
+    expect(getCapabilitiesForModel(PROVIDER, "gpt-4o").vision).toBe(true);
   });
 });

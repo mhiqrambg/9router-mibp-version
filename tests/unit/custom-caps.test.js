@@ -39,4 +39,29 @@ describe("custom capability overrides", () => {
     expect(lookupCaps(map, "oc", "never-edited")).toBeNull();
     expect(lookupCaps(null, "oc", "anything")).toBeNull();
   });
+
+  it("indexes the canonical provider id as well as the dashboard alias", () => {
+    const map = buildCapsLookup([
+      { providerAlias: "oc", providerId: "opencode-go", id: "mimo-v2.6-flash-free", caps: { vision: false } },
+    ]);
+    expect(lookupCaps(map, "opencode-go", "mimo-v2.6-flash-free")).toEqual({ vision: false });
+    expect(lookupCaps(map, "oc", "mimo-v2.6-flash-free")).toEqual({ vision: false });
+  });
+
+  it("drops the bare-id fallback when two providers share a model id", () => {
+    const map = buildCapsLookup([
+      { providerAlias: "provider-a", id: "shared-id", caps: { vision: false } },
+      { providerAlias: "provider-b", id: "shared-id", caps: { vision: true } },
+    ]);
+    expect(lookupCaps(map, "provider-a", "shared-id")).toEqual({ vision: false });
+    expect(lookupCaps(map, "provider-b", "shared-id")).toEqual({ vision: true });
+    // No provider at all must not inherit either row's values.
+    expect(lookupCaps(map, "", "shared-id")).toBeNull();
+    expect(lookupCaps(map, "provider-c", "shared-id")).toBeNull();
+  });
+
+  it("drops boolean keys outside the editable capability whitelist", () => {
+    expect(sanitizeCaps({ vision: false, pdf: false }, ["vision"])).toEqual({ vision: false });
+    expect(sanitizeCaps({ pdf: false }, ["vision"])).toBeNull();
+  });
 });

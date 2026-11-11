@@ -91,7 +91,7 @@ function CompatibleModelRow({ modelId, fullModel, copied, onCopy, onDeleteAlias,
   );
 }
 
-export default function CompatibleModelsSection({ providerStorageAlias, providerDisplayAlias, modelAliases, customModels, copied, onCopy, onDeleteAlias, onAddCustomModel, onDeleteCustomModel, onSaveCustomModel, connections, isAnthropic }) {
+export default function CompatibleModelsSection({ providerStorageAlias, providerDisplayAlias, modelAliases, customModels, copied, onCopy, onDeleteAlias, onAddCustomModel, onDeleteCustomModel, onSaveCustomModel, resolveCaps, connections, isAnthropic }) {
   const [newModel, setNewModel] = useState("");
   const [adding, setAdding] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -245,6 +245,7 @@ export default function CompatibleModelsSection({ providerStorageAlias, provider
       <EditModelCapsModal
         isOpen={!!editing}
         record={editing?.record ? { ...editing.record, id: editing.id } : { id: editing?.id }}
+        fallbackCaps={editing && resolveCaps ? resolveCaps(`${providerStorageAlias}/${editing.id}`) : null}
         providerDisplayAlias={providerDisplayAlias}
         onSave={handleSaveCaps}
         onClose={() => setEditing(null)}
@@ -264,6 +265,7 @@ CompatibleModelsSection.propTypes = {
   onAddCustomModel: PropTypes.func.isRequired,
   onDeleteCustomModel: PropTypes.func.isRequired,
   onSaveCustomModel: PropTypes.func.isRequired,
+  resolveCaps: PropTypes.func,
   connections: PropTypes.arrayOf(PropTypes.shape({
     id: PropTypes.string,
     isActive: PropTypes.bool,
