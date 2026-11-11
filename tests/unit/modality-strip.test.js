@@ -126,10 +126,21 @@ describe("stripUnsupportedModalities", () => {
     const mention = { messages: [{ role: "tool", content: "x `data:image/jpeg;base64,...` y" }] };
     stripUnsupportedModalities(mention, FORMATS.OPENAI, ALL);
     expect(mention.messages[0].content).not.toContain("data:image/");
+    expect(mention.messages[0].content).toBe("x `[inline image data URI omitted from text]` y");
+    expect(mention.messages[0].content).not.toMatch(/model has no vision support/);
     const real = `data:image/png;base64,${"iVBORw0KGgoAAAANSUhEUg".repeat(10)}`;
     const intact = { messages: [{ role: "user", content: `see ${real} here` }] };
     stripUnsupportedModalities(intact, FORMATS.OPENAI, ALL);
     expect(intact.messages[0].content).toContain(real);
+  });
+
+  it("openai: mentions of audio/pdf use neutral text when the model supports them", () => {
+    const body = { messages: [{ role: "tool", content: "a data:audio/mp3;base64,... b data:application/pdf;base64,... c" }] };
+    stripUnsupportedModalities(body, FORMATS.OPENAI, ALL);
+    expect(body.messages[0].content).toBe(
+      "a [inline audio data URI omitted from text] b [inline PDF data URI omitted from text] c",
+    );
+    expect(body.messages[0].content).not.toMatch(/no audio support|no document support/);
   });
 
   it("openai: leaves bare mime mention without payload alone", () => {

@@ -18,6 +18,16 @@ const PLACEHOLDER_PREV = {
 };
 const ph = (cap, isLast) => (isLast ? PLACEHOLDER_CURRENT : PLACEHOLDER_PREV)[cap];
 
+// Mention redaction never asserts a missing capability: the bytes were
+// dropped from TEXT, not because the model cannot see images.
+const MENTION_NEUTRAL = {
+  vision: "[inline image data URI omitted from text]",
+  audioInput: "[inline audio data URI omitted from text]",
+  pdf: "[inline PDF data URI omitted from text]",
+};
+const mentionPh = (cap, isLast, caps) =>
+  !caps || caps[cap] === false ? ph(cap, isLast) : MENTION_NEUTRAL[cap];
+
 // Map gemini inlineData/fileData mime prefix -> capability it requires.
 function capForMime(mime) {
   if (typeof mime !== "string") return null;
@@ -59,10 +69,10 @@ const MENTION_DATA_URI = [
   { cap: "pdf", re: /data:application\/pdf(?:;[A-Za-z0-9+.-]+)?;base64,(?:\.\.\.|[A-Za-z0-9+/=]{0,64}(?![A-Za-z0-9+/=]))/gi },
 ];
 
-function redactEmbeddedDataUris(text, isLast) {
+function redactEmbeddedDataUris(text, isLast, caps) {
   let out = text;
   for (const { cap, re } of MENTION_DATA_URI) {
-    const next = out.replace(re, ph(cap, isLast));
+    const next = out.replace(re, mentionPh(cap, isLast, caps));
     if (next !== out) out = next;
   }
   return out;
@@ -97,7 +107,7 @@ function redactInlinePayloads(text) {
 function redactMentionStrings(body, sourceFormat, caps) {
   const dropInline = caps?.dropInlineMediaPayloads === true;
   const scrub = (text, isLast) => {
-    const out = redactEmbeddedDataUris(text, isLast);
+    const out = redactEmbeddedDataUris(text, isLast, caps);
     return dropInline ? redactInlinePayloads(out) : out;
   };
   const redactMessages = (messages) => {
