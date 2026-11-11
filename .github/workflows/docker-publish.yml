@@ -69,7 +69,9 @@ jobs:
         with:
           context: .
           outputs: type=image,name=${{ env.GHCR_IMAGE }},push-by-digest=true,name-canonical=true
-          cache-from: type=registry,ref=${{ env.GHCR_IMAGE }}:buildcache-${{ matrix.arch }}
+          cache-from: |
+            type=registry,ref=${{ env.GHCR_IMAGE }}:buildcache-${{ matrix.arch }}
+            type=registry,ref=${{ env.GHCR_IMAGE }}:buildcache
           cache-to: type=registry,ref=${{ env.GHCR_IMAGE }}:buildcache-${{ matrix.arch }},mode=max
           platforms: ${{ matrix.platform }}
           provenance: false
