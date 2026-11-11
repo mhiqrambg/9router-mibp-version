@@ -19,10 +19,19 @@ describe("getCapabilitiesForModel", () => {
     });
     // the superseded text-only Flash id stays text-only
     expect(getCapabilitiesForModel("opencode-go", "deepseek-v4-flash").vision).toBe(false);
-    // deepseek-v4.1-flash-1017:flex inherits vision from *deepseek-v4.** —
-    // probed live: it answers a real image_url block correctly, so the id
-    // must keep vision:true or the strip would eat working image inputs.
-    expect(getCapabilitiesForModel(undefined, "deepseek-v4.1-flash-1017:flex").vision).toBe(true);
+    // The 1017 LoRA itself reads images (probed live on nli); only its `flex`
+    // servings drop them — probed 2026-11-11, an image_url part (data URI or
+    // https URL) 400s on the runcrate and nutaraline flex lanes. Text-only is
+    // what lets the vision capacity adapter route the image elsewhere.
+    expect(getCapabilitiesForModel("nli", "deepseek-v4.1-flash-1017").vision).toBe(true);
+    for (const flexId of [
+      "deepseek-v4.1-flash-1017:flex",
+      "deepseek-v4.1-flash-1017-flex",
+      "deepseek-v4.1-flash-1017-flex:high",
+    ]) {
+      expect(getCapabilitiesForModel(undefined, flexId).vision).toBe(false);
+      expect(getCapabilitiesForModel("nli", flexId).vision).toBe(false);
+    }
     // Same lane 400s on a full inline data URI in TEXT (probed: 3.5 KB jpeg
     // data URI in a tool result), so the payload is dropped before sending.
     expect(getCapabilitiesForModel(undefined, "deepseek-v4.1-flash-1017:flex").dropInlineMediaPayloads).toBe(true);

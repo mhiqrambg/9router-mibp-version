@@ -623,6 +623,15 @@ export const PATTERN_CAPABILITIES = [
   // v4.1+ has real image input (probed live on Alibaba MaaS: correct color
   // read from a PNG). v4-pro / v4-flash-0731 accept image blocks but ignore
   // them (answered "Unknown"), so vision stays scoped to v4.* dotted releases.
+  // The `:flex` siblings of a vision model are LoRA servings on lanes that drop
+  // images: probed 2026-11-11, an `image_url` part — base64 data URI or https
+  // URL — answers 400 upstream_invalid_request on both the runcrate and the
+  // nutaraline flex lane, while nli/deepseek-v4.1-flash-1017 (no flex) reads
+  // images fine. "1017*flex" covers both spellings (`:flex` on a connection
+  // model, `-flex` on the alias the gateway publishes). Declaring the flex id
+  // text-only strips the image before dispatch and lets the vision capacity
+  // adapter route it to a model that can read it.
+  { pattern: "*1017*flex*",     caps: { vision: false, reasoning: true, thinkingFormat: "deepseek", thinkingEffortSupported: true, contextWindow: 1000000, maxOutput: 128000, dropInlineMediaPayloads: true } },
   { pattern: "*deepseek-v4.*",  caps: { vision: true, reasoning: true, thinkingFormat: "deepseek", thinkingEffortSupported: true, contextWindow: 1000000, maxOutput: 128000, dropInlineMediaPayloads: true } },
   { pattern: "*deepseek-v4*",   caps: { reasoning: true, thinkingFormat: "deepseek", thinkingEffortSupported: true, contextWindow: 1000000, maxOutput: 384000 } },
   { pattern: "*reasoner*",      caps: { reasoning: true, thinkingFormat: "deepseek", thinkingCanDisable: false, contextWindow: 128000 } },
