@@ -777,6 +777,27 @@ function getCatalogSource() {
   return globalThis.__9rCatalogSource || null;
 }
 
+// Dashboard-edited capability overrides for individual models (the Vision /
+// Reasoning / Speech-to-text toggles on a provider page). Same install-and-slot
+// shape as the catalog source: the server builds a lookup from the custom-model
+// table at startup and after every save, and every chunk copy reads the
+// globalThis slot so a write in the API route is visible to request handling.
+let customCapsSource = null;
+
+/**
+ * Install the custom-model capability override reader (server only).
+ * @param {{ getCaps: (provider: string, model: string) => object|null } | null} source
+ */
+export function setCustomCapsSource(source) {
+  customCapsSource = source;
+  if (typeof globalThis !== "undefined") globalThis.__9rCustomCapsSource = source;
+}
+
+function getCustomCapsSource() {
+  if (typeof globalThis === "undefined") return customCapsSource;
+  return globalThis.__9rCustomCapsSource || null;
+}
+
 // Apply the synced catalog + name heuristic on top of a table-resolved result.
 // Strictly additive: a capability already true stays true, and a false one only
 // flips when an outside source positively declares support.
@@ -842,6 +863,17 @@ function isCommandCodeTextOnly(model) {
   return false;
 }
 export function getCapabilitiesForModel(provider, model) {
+  const resolved = resolveModelCapabilities(provider, model);
+  const source = getCustomCapsSource();
+  if (!source || !model) return resolved;
+  const override = source.getCaps?.(provider, model);
+  if (!override) return resolved;
+  // Explicit dashboard values win over the table, including `false`: an operator
+  // marking a model text-only must beat a pattern that guesses vision.
+  return { ...resolved, ...override };
+}
+
+function resolveModelCapabilities(provider, model) {
   if (!model) return { ...DEFAULT_CAPABILITIES };
 
   // Canonical exact lookup strips vendor prefix: "anthropic/claude-opus-4.7" -> "claude-opus-4.7".

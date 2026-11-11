@@ -8,6 +8,11 @@ export async function register() {
     const { installCatalogSource } = await import("open-sse/providers/catalogOverride.js");
     await installCatalogSource();
 
+    // Dashboard-edited per-model capabilities (Vision / Reasoning) must reach
+    // capability resolution, not just the badge in the UI.
+    const { installModelCapOverrides } = await import("@/lib/modelCaps/overrides.js");
+    await installModelCapOverrides();
+
     const { startModelCatalogSync } = await import("@/lib/modelCatalog/sync.js");
     startModelCatalogSync();
   }

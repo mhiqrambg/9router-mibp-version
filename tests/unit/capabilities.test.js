@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { getCapabilitiesForModel } from "../../open-sse/providers/capabilities.js";
+import * as capabilitiesModule from "../../open-sse/providers/capabilities.js";
 
 describe("getCapabilitiesForModel", () => {
 
@@ -358,5 +359,43 @@ describe("OpenCode Free ids newer than the capability tables", () => {
       contextWindow: 1048576,
       maxOutput: 131072,
     });
+  });
+});
+
+describe("getCapabilitiesForModel custom overrides", () => {
+  const install = (map) => {
+    capabilitiesModule.setCustomCapsSource({
+      getCaps(provider, model) {
+        return map[`${String(provider || "").toLowerCase()}|${String(model || "").toLowerCase()}`] || null;
+      },
+    });
+  };
+
+  it("keeps an explicit false from a dashboard edit when the table says true", () => {
+    const model = "deepseek-v4.1-flash";
+    expect(getCapabilitiesForModel("opencode-go", model).vision).toBe(true);
+    install({ [`opencode-go|${model}`]: { vision: false, reasoning: false } });
+    try {
+      expect(getCapabilitiesForModel("opencode-go", model)).toMatchObject({ vision: false, reasoning: false });
+      // A provider-scoped edit leaves the same id on other providers alone.
+      expect(getCapabilitiesForModel("openrouter", model).vision).toBe(true);
+    } finally {
+      capabilitiesModule.setCustomCapsSource(null);
+    }
+    expect(getCapabilitiesForModel("opencode-go", model).vision).toBe(true);
+  });
+
+  it("lets a dashboard edit grant vision a pattern denies", () => {
+    const model = "deepseek-v4.1-flash-1017:flex";
+    const before = getCapabilitiesForModel("", model).vision;
+    install({ [`|${model}`]: { vision: true } });
+    try {
+      expect(getCapabilitiesForModel("", model).vision).toBe(true);
+      // Overlays merge, so the pattern's limits survive the edit.
+      expect(getCapabilitiesForModel("", model).contextWindow).toBeGreaterThan(0);
+    } finally {
+      capabilitiesModule.setCustomCapsSource(null);
+    }
+    expect(getCapabilitiesForModel("", model).vision).toBe(before);
   });
 });

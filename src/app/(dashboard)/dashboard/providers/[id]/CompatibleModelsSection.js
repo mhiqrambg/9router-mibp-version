@@ -4,7 +4,16 @@ import { useState } from "react";
 import PropTypes from "prop-types";
 import { Button } from "@/shared/components";
 import { getProviderCustomModelRows } from "@/shared/utils/providerCustomModels";
-function CompatibleModelRow({ modelId, fullModel, copied, onCopy, onDeleteAlias, onTest, testStatus, isTesting }) {
+import EditModelCapsModal from "./EditModelCapsModal";
+
+const CAP_CHIPS = [
+  { key: "vision", label: "Vision" },
+  { key: "reasoning", label: "Reasoning" },
+];
+
+function CompatibleModelRow({ modelId, fullModel, copied, onCopy, onDeleteAlias, onTest, testStatus, isTesting, caps, onEdit }) {
+  const isStt = (caps?.kind || caps?.type) === "stt";
+  const activeChips = CAP_CHIPS.filter((chip) => caps?.caps?.[chip.key] === true);
   const borderColor = testStatus === "ok"
     ? "border-green-500/40"
     : testStatus === "error"
@@ -27,8 +36,12 @@ function CompatibleModelRow({ modelId, fullModel, copied, onCopy, onDeleteAlias,
       </span>
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium truncate">{modelId}</p>
-        <div className="flex items-center gap-1 mt-1">
+        <div className="flex items-center gap-1 mt-1 flex-wrap">
           <code className="text-xs text-text-muted font-mono bg-sidebar px-1.5 py-0.5 rounded">{fullModel}</code>
+          {activeChips.map((chip) => (
+            <span key={chip.key} className="text-[10px] text-text-muted bg-sidebar px-1.5 py-0.5 rounded">{chip.label}</span>
+          ))}
+          {isStt && <span className="text-[10px] text-text-muted bg-sidebar px-1.5 py-0.5 rounded">STT</span>}
           <div className="relative group/btn">
             <button
               onClick={() => onCopy(fullModel, `model-${modelId}`)}
@@ -61,6 +74,13 @@ function CompatibleModelRow({ modelId, fullModel, copied, onCopy, onDeleteAlias,
         </div>
       </div>
       <button
+        onClick={onEdit}
+        className="p-1 hover:bg-sidebar rounded text-text-muted hover:text-primary"
+        title="Edit capabilities"
+      >
+        <span className="material-symbols-outlined text-sm">tune</span>
+      </button>
+      <button
         onClick={onDeleteAlias}
         className="p-1 hover:bg-red-50 rounded text-red-500"
         title="Remove model"
@@ -71,12 +91,21 @@ function CompatibleModelRow({ modelId, fullModel, copied, onCopy, onDeleteAlias,
   );
 }
 
-export default function CompatibleModelsSection({ providerStorageAlias, providerDisplayAlias, modelAliases, customModels, copied, onCopy, onDeleteAlias, onAddCustomModel, onDeleteCustomModel, connections, isAnthropic }) {
+export default function CompatibleModelsSection({ providerStorageAlias, providerDisplayAlias, modelAliases, customModels, copied, onCopy, onDeleteAlias, onAddCustomModel, onDeleteCustomModel, onSaveCustomModel, connections, isAnthropic }) {
   const [newModel, setNewModel] = useState("");
   const [adding, setAdding] = useState(false);
   const [importing, setImporting] = useState(false);
   const [testingModelId, setTestingModelId] = useState(null);
   const [modelTestResults, setModelTestResults] = useState({});
+  const [editing, setEditing] = useState(null); // { id, record } | null
+
+  const findRecord = (modelId) =>
+    customModels.find((m) => m?.id === modelId && m.providerAlias === providerStorageAlias) || null;
+
+  const handleSaveCaps = async ({ type, previousType, caps, transport }) => {
+    if (!editing) return;
+    await onSaveCustomModel(editing.id, { type, previousType, caps, transport });
+  };
 
   const handleTestModel = async (modelId) => {
     if (testingModelId) return;
@@ -203,6 +232,8 @@ export default function CompatibleModelsSection({ providerStorageAlias, provider
               copied={copied}
               onCopy={onCopy}
               onDeleteAlias={() => source === "custom" ? onDeleteCustomModel(id) : onDeleteAlias(alias)}
+              onEdit={() => setEditing({ id, record: findRecord(id) })}
+              caps={findRecord(id)}
               onTest={connections.length > 0 ? () => handleTestModel(id) : undefined}
               testStatus={modelTestResults[id]}
               isTesting={testingModelId === id}
@@ -210,6 +241,14 @@ export default function CompatibleModelsSection({ providerStorageAlias, provider
           ))}
         </div>
       )}
+
+      <EditModelCapsModal
+        isOpen={!!editing}
+        record={editing?.record ? { ...editing.record, id: editing.id } : { id: editing?.id }}
+        providerDisplayAlias={providerDisplayAlias}
+        onSave={handleSaveCaps}
+        onClose={() => setEditing(null)}
+      />
     </div>
   );
 }
@@ -224,6 +263,7 @@ CompatibleModelsSection.propTypes = {
   onDeleteAlias: PropTypes.func.isRequired,
   onAddCustomModel: PropTypes.func.isRequired,
   onDeleteCustomModel: PropTypes.func.isRequired,
+  onSaveCustomModel: PropTypes.func.isRequired,
   connections: PropTypes.arrayOf(PropTypes.shape({
     id: PropTypes.string,
     isActive: PropTypes.bool,

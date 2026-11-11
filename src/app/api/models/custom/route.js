@@ -24,6 +24,18 @@ function sanitizeTransport(transport, type) {
   return transport.trim();
 }
 
+// Routing reads custom caps from an in-memory lookup installed at startup;
+// refresh it so a dashboard save takes effect on the next request without a
+// restart.
+async function refreshCapOverrides() {
+  try {
+    const { refreshModelCapOverrides } = await import("@/lib/modelCaps/overrides.js");
+    await refreshModelCapOverrides();
+  } catch (error) {
+    console.log("Error refreshing custom capability overrides:", error);
+  }
+}
+
 // GET /api/models/custom - List all custom models
 export async function GET() {
   try {
@@ -45,6 +57,7 @@ export async function POST(request) {
     const cleanCaps = sanitizeCaps(caps);
     const cleanTransport = sanitizeTransport(transport, type || "llm");
     const added = await addCustomModel({ providerAlias, id, type: type || "llm", name, ...(cleanCaps ? { caps: cleanCaps } : {}), ...(cleanTransport ? { transport: cleanTransport } : {}) });
+    await refreshCapOverrides();
     return NextResponse.json({ success: true, added });
   } catch (error) {
     console.log("Error adding custom model:", error);
@@ -63,6 +76,7 @@ export async function DELETE(request) {
       return NextResponse.json({ error: "providerAlias and id required" }, { status: 400 });
     }
     await deleteCustomModel({ providerAlias, id, type });
+    await refreshCapOverrides();
     return NextResponse.json({ success: true });
   } catch (error) {
     console.log("Error deleting custom model:", error);
