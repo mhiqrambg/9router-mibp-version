@@ -14,6 +14,18 @@ export default function EditModelCapsModal({ isOpen, record, fallbackCaps, provi
   const [transport, setTransport] = useState("");
   const [saving, setSaving] = useState(false);
 
+  // The parent passes record/fallbackCaps as fresh objects on every render, so
+  // object identity is not a usable dependency: an unrelated test/status update
+  // would re-seed and silently discard the toggle the operator just flipped.
+  // Seed on content instead.
+  const seedKey = JSON.stringify({
+    id: record?.id || null,
+    stored: record?.caps || null,
+    resolved: fallbackCaps || null,
+    type: record?.kind || record?.type || null,
+    transport: record?.transport || null,
+  });
+
   useEffect(() => {
     if (!isOpen) return;
     // A model edited for the first time shows what routing currently believes,
@@ -22,7 +34,8 @@ export default function EditModelCapsModal({ isOpen, record, fallbackCaps, provi
     setStt((record?.kind || record?.type) === "stt");
     setTransport(record?.transport || "");
     setSaving(false);
-  }, [isOpen, record, fallbackCaps]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, seedKey]);
 
   const handleSave = async () => {
     if (saving) return;
