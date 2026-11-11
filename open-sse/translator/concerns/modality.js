@@ -16,7 +16,16 @@ const PLACEHOLDER_PREV = {
   audioInput: "[Previous audio omitted from context.]",
   pdf: "[Previous file omitted from context.]",
 };
-const ph = (cap, isLast) => (isLast ? PLACEHOLDER_CURRENT : PLACEHOLDER_PREV)[cap];
+// The lane — not the model — refused the media (caps.mediaUnsupportedByLane).
+// Saying "the model has no vision support" would be a capability claim we don't
+// have evidence for: the same model id may read images behind another upstream.
+const PLACEHOLDER_LANE = {
+  vision: "[image omitted: this upstream lane does not accept image input]",
+  audioInput: "[audio omitted: this upstream lane does not accept audio input]",
+  pdf: "[file omitted: this upstream lane does not accept file input]",
+};
+const ph = (cap, isLast, caps) =>
+  caps?.mediaUnsupportedByLane ? PLACEHOLDER_LANE[cap] : (isLast ? PLACEHOLDER_CURRENT : PLACEHOLDER_PREV)[cap];
 
 // Mention redaction never asserts a missing capability: the bytes were
 // dropped from TEXT, not because the model cannot see images.
@@ -26,7 +35,7 @@ const MENTION_NEUTRAL = {
   pdf: "[inline PDF data URI omitted from text]",
 };
 const mentionPh = (cap, isLast, caps) =>
-  !caps || caps[cap] === false ? ph(cap, isLast) : MENTION_NEUTRAL[cap];
+  !caps || caps[cap] === false ? ph(cap, isLast, caps) : MENTION_NEUTRAL[cap];
 
 // Map gemini inlineData/fileData mime prefix -> capability it requires.
 function capForMime(mime) {
@@ -157,7 +166,7 @@ function filterBlocks(blocks, capOf, caps, removed, isLast) {
     if (cap && caps[cap] === false) { removed.add(cap); continue; }
     out.push(block);
   }
-  for (const cap of removed) out.push({ type: "text", text: ph(cap, isLast) });
+  for (const cap of removed) out.push({ type: "text", text: ph(cap, isLast, caps) });
   return out;
 }
 
@@ -208,7 +217,7 @@ function stripResponses(body, caps) {
       if (cap && caps[cap] === false) { removed.add(cap); return false; }
       return true;
     });
-    for (const cap of removed) item.content.push({ type: "input_text", text: ph(cap, i === last) });
+    for (const cap of removed) item.content.push({ type: "input_text", text: ph(cap, i === last, caps) });
   });
 }
 
@@ -225,7 +234,7 @@ function stripGeminiParts(contents, caps) {
       if (cap && caps[cap] === false) { removed.add(cap); return false; }
       return true;
     });
-    for (const cap of removed) c.parts.push({ text: ph(cap, i === last) });
+    for (const cap of removed) c.parts.push({ text: ph(cap, i === last, caps) });
   });
 }
 
@@ -272,4 +281,42 @@ export function stripUnsupportedModalities(body, sourceFormat, caps) {
       stripOpenAI(body, caps);
   }
   return true;
+}
+
+/**
+ * True when the body still carries media parts (image/audio/file) for its
+ * format. Lets a caller tell "upstream rejected this because of media" from an
+ * unrelated bad request before retrying with the media stripped.
+ * @param {object} body - request body in `sourceFormat` shape
+ * @param {string} sourceFormat - one of FORMATS
+ */
+export function hasMediaBlocks(body, sourceFormat) {
+  if (!body) return false;
+  switch (sourceFormat) {
+    case FORMATS.CLAUDE:
+      return (body.messages || []).some(
+        (m) => Array.isArray(m?.content) && m.content.some((b) => capForClaudeBlock(b))
+      );
+    case FORMATS.OPENAI_RESPONSES:
+    case FORMATS.OPENAI_RESPONSE:
+    case FORMATS.CODEX:
+      return (body.input || []).some(
+        (item) => Array.isArray(item?.content) && item.content.some((b) => b?.type === "input_image" || b?.type === "input_file")
+      );
+    case FORMATS.GEMINI:
+    case FORMATS.GEMINI_CLI:
+    case FORMATS.VERTEX:
+      return (body.contents || []).some(
+        (c) => Array.isArray(c?.parts) && c.parts.some((p) => capForMime(p?.inlineData?.mimeType || p?.fileData?.mimeType))
+      );
+    case FORMATS.ANTIGRAVITY:
+      return hasMediaBlocks({ contents: body?.request?.contents }, FORMATS.GEMINI);
+    default:
+      return (body.messages || []).some(
+        (m) =>
+          (Array.isArray(m?.content) && m.content.some((b) => capForOpenAIBlock(b))) ||
+          (Array.isArray(m?.images) && m.images.length > 0) ||
+          (Array.isArray(m?.attachments) && m.attachments.length > 0)
+      );
+  }
 }
