@@ -73,7 +73,11 @@ function capForClaudeBlock(block) {
 // real image inputs keep working. Applies regardless of model capability:
 // a truncated mention is never a viewable image for any model.
 const MENTION_DATA_URI = [
-  { cap: "vision", re: /data:image\/[A-Za-z0-9+.-]+;base64,(?:\.\.\.|[A-Za-z0-9+/=]{0,64}(?![A-Za-z0-9+/=]))/gi },
+  // `;base64,` is optional: a bare token (`data:image/png`, `data:image/`)
+  // inside a tool result 400s the lane as well (probed: `data:audio/` and
+  // `data:application/pdf` do not). The lookahead keeps a genuine long payload
+  // intact so vision routing and real inline images still see it.
+  { cap: "vision", re: /data:image\/[A-Za-z0-9+.-]*(?![A-Za-z0-9+.-])(?!;base64,[A-Za-z0-9+/=]{65})(?:;base64,(?:\.\.\.|[A-Za-z0-9+/=]{0,64}(?![A-Za-z0-9+/=])))?/gi },
   { cap: "audioInput", re: /data:audio\/[A-Za-z0-9+.-]+;base64,(?:\.\.\.|[A-Za-z0-9+/=]{0,64}(?![A-Za-z0-9+/=]))/gi },
   { cap: "pdf", re: /data:application\/pdf(?:;[A-Za-z0-9+.-]+)?;base64,(?:\.\.\.|[A-Za-z0-9+/=]{0,64}(?![A-Za-z0-9+/=]))/gi },
 ];

@@ -143,10 +143,21 @@ describe("stripUnsupportedModalities", () => {
     expect(body.messages[0].content).not.toMatch(/no audio support|no document support/);
   });
 
-  it("openai: leaves bare mime mention without payload alone", () => {
+  it("openai: redacts a bare mime mention with no payload", () => {
     const body = { messages: [{ role: "tool", content: 'if (mime === "data:image/png") return;' }] };
     stripUnsupportedModalities(body, FORMATS.OPENAI, NO_VISION);
-    expect(body.messages[0].content).toContain("data:image/png");
+    expect(body.messages[0].content).not.toContain("data:image/");
+    expect(body.messages[0].content).toContain('if (mime === "');
+    expect(body.messages[0].content).toContain('") return;');
+    expect(body.messages[0].content).toMatch(/image omitted/);
+  });
+
+  it("openai: redacts a bare data:image/ prefix and keeps surrounding code", () => {
+    const body = { messages: [{ role: "tool", content: 'if (m.content.includes("data:image/")) required.add("vision");' }] };
+    stripUnsupportedModalities(body, FORMATS.OPENAI, ALL);
+    expect(body.messages[0].content).not.toContain("data:image/");
+    expect(body.messages[0].content).toContain('required.add("vision");');
+    expect(body.messages[0].content).not.toMatch(/model has no vision support/);
   });
 
   it("openai: drops a full inline data URI only when the lane rejects them", () => {
