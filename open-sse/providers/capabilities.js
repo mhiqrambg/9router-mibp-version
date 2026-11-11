@@ -64,6 +64,11 @@ export const DEFAULT_CAPABILITIES = {
   // limits (tokens)
   contextWindow: 200000,
   maxOutput: 64000,
+  // Some upstream lanes reject a request whose TEXT contains a full inline
+  // data URI (probed: 3.5 KB jpeg data URI inside a tool result -> HTTP 400),
+  // even when the same bytes are accepted as an image block. When true, the
+  // text payload is replaced by a size-annotated placeholder before sending.
+  dropInlineMediaPayloads: false,
 };
 
 // User-added model metadata can carry dashboard service kinds instead of the
@@ -618,7 +623,7 @@ export const PATTERN_CAPABILITIES = [
   // v4.1+ has real image input (probed live on Alibaba MaaS: correct color
   // read from a PNG). v4-pro / v4-flash-0731 accept image blocks but ignore
   // them (answered "Unknown"), so vision stays scoped to v4.* dotted releases.
-  { pattern: "*deepseek-v4.*",  caps: { vision: true, reasoning: true, thinkingFormat: "deepseek", thinkingEffortSupported: true, contextWindow: 1000000, maxOutput: 128000 } },
+  { pattern: "*deepseek-v4.*",  caps: { vision: true, reasoning: true, thinkingFormat: "deepseek", thinkingEffortSupported: true, contextWindow: 1000000, maxOutput: 128000, dropInlineMediaPayloads: true } },
   { pattern: "*deepseek-v4*",   caps: { reasoning: true, thinkingFormat: "deepseek", thinkingEffortSupported: true, contextWindow: 1000000, maxOutput: 384000 } },
   { pattern: "*reasoner*",      caps: { reasoning: true, thinkingFormat: "deepseek", thinkingCanDisable: false, contextWindow: 128000 } },
   { pattern: "*deepseek-r*",    caps: { reasoning: true, thinkingFormat: "deepseek", thinkingCanDisable: false, contextWindow: 128000 } },

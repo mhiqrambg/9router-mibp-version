@@ -23,6 +23,10 @@ describe("getCapabilitiesForModel", () => {
     // probed live: it answers a real image_url block correctly, so the id
     // must keep vision:true or the strip would eat working image inputs.
     expect(getCapabilitiesForModel(undefined, "deepseek-v4.1-flash-1017:flex").vision).toBe(true);
+    // Same lane 400s on a full inline data URI in TEXT (probed: 3.5 KB jpeg
+    // data URI in a tool result), so the payload is dropped before sending.
+    expect(getCapabilitiesForModel(undefined, "deepseek-v4.1-flash-1017:flex").dropInlineMediaPayloads).toBe(true);
+    expect(getCapabilitiesForModel("anthropic", "claude-sonnet-5.5").dropInlineMediaPayloads).toBe(false);
   });
   const claudeSonnet5Expected = {
     contextWindow: 1000000,

@@ -138,6 +138,29 @@ describe("stripUnsupportedModalities", () => {
     expect(body.messages[0].content).toContain("data:image/png");
   });
 
+  it("openai: drops a full inline data URI only when the lane rejects them", () => {
+    const payload = "iVBORw0KGgoAAAANSUhEUg".repeat(10);
+    const text = `upload payload => data:image/jpeg;base64,${payload}; done`;
+    const strict = { messages: [{ role: "tool", content: text }] };
+    stripUnsupportedModalities(strict, FORMATS.OPENAI, { ...ALL, dropInlineMediaPayloads: true });
+    expect(strict.messages[0].content).not.toContain("data:image/");
+    expect(strict.messages[0].content).not.toContain(payload);
+    expect(strict.messages[0].content).toMatch(/inline image data URI omitted: 220 base64 chars/);
+    expect(strict.messages[0].content).toContain("upload payload =>");
+    expect(strict.messages[0].content).toContain("; done");
+  });
+
+  it("openai: keeps image blocks when inline payloads are dropped", () => {
+    const payload = "iVBORw0KGgoAAAANSUhEUg".repeat(10);
+    const body = { messages: [{ role: "user", content: [
+      { type: "text", text: `see data:image/png;base64,${payload}` },
+      { type: "image_url", image_url: { url: `data:image/png;base64,${payload}` } },
+    ] }] };
+    stripUnsupportedModalities(body, FORMATS.OPENAI, { ...ALL, dropInlineMediaPayloads: true });
+    expect(body.messages[0].content[0].text).not.toContain("data:image/");
+    expect(body.messages[0].content[1].image_url.url).toContain(payload);
+  });
+
   it("openai: redacts embedded audio/pdf URIs by capability", () => {
     const body = { messages: [{ role: "user", content: "a data:audio/mp3;base64,ZZZ b data:application/pdf;base64,YYY" }] };
     stripUnsupportedModalities(body, FORMATS.OPENAI, { vision: true, audioInput: false, pdf: false });

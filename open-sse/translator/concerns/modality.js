@@ -68,17 +68,43 @@ function redactEmbeddedDataUris(text, isLast) {
   return out;
 }
 
+// Full inline data URIs inside plain STRING content. Same strict lanes reject
+// these too (probed: a 3.5 KB jpeg data URI as text -> 400 on every attempt,
+// while the identical bytes work as an image block). Only models whose lane is
+// known to reject inline text payloads get this (caps.dropInlineMediaPayloads):
+// the bytes are unusable as an image there, and keeping them kills the whole
+// request. Blocks are never touched, so real image inputs still work.
+const INLINE_DATA_URI = [
+  { cap: "vision", re: /data:image\/[A-Za-z0-9+.-]+;base64,([A-Za-z0-9+/=]+)/gi },
+  { cap: "audioInput", re: /data:audio\/[A-Za-z0-9+.-]+;base64,([A-Za-z0-9+/=]+)/gi },
+  { cap: "pdf", re: /data:application\/pdf(?:;[A-Za-z0-9+.-]+)?;base64,([A-Za-z0-9+/=]+)/gi },
+];
+const INLINE_LABEL = { vision: "image", audioInput: "audio", pdf: "PDF" };
+
+function redactInlinePayloads(text) {
+  let out = text;
+  for (const { cap, re } of INLINE_DATA_URI) {
+    out = out.replace(re, (_m, payload) => `[inline ${INLINE_LABEL[cap]} data URI omitted: ${payload.length} base64 chars]`);
+  }
+  return out;
+}
+
 // Mention redaction across request shapes. Runs for every model — before the
 // capability fast-exit in stripUnsupportedModalities: a truncated mention is
 // never a viewable image, and strict upstream lanes 400 on the mere
 // substring. Genuine payloads (blocks, long base64) are untouched, so vision
 // routing (which scans the pre-strip body) and real image inputs keep working.
-function redactMentionStrings(body, sourceFormat) {
+function redactMentionStrings(body, sourceFormat, caps) {
+  const dropInline = caps?.dropInlineMediaPayloads === true;
+  const scrub = (text, isLast) => {
+    const out = redactEmbeddedDataUris(text, isLast);
+    return dropInline ? redactInlinePayloads(out) : out;
+  };
   const redactMessages = (messages) => {
     if (!Array.isArray(messages)) return;
     const last = messages.length - 1;
     messages.forEach((msg, i) => {
-      if (msg && typeof msg.content === "string") msg.content = redactEmbeddedDataUris(msg.content, i === last);
+      if (msg && typeof msg.content === "string") msg.content = scrub(msg.content, i === last);
     });
   };
   const redactParts = (contents, getParts) => {
@@ -88,7 +114,7 @@ function redactMentionStrings(body, sourceFormat) {
       const parts = getParts(c);
       if (!Array.isArray(parts)) return;
       parts.forEach((p) => {
-        if (p && typeof p.text === "string") p.text = redactEmbeddedDataUris(p.text, i === last);
+        if (p && typeof p.text === "string") p.text = scrub(p.text, i === last);
       });
     });
   };
@@ -108,6 +134,7 @@ function redactMentionStrings(body, sourceFormat) {
       return;
     default:
       redactMessages(body.messages);
+      redactParts(body.messages, (msg) => msg?.content?.filter?.((b) => b?.type === "text"));
   }
 }
 
@@ -201,8 +228,10 @@ function stripGeminiParts(contents, caps) {
  */
 export function stripUnsupportedModalities(body, sourceFormat, caps) {
   if (!body || !caps) return false;
-  // Mention redaction first (capability-independent); fast exit only skips block-level strip.
-  redactMentionStrings(body, sourceFormat);
+  // Mention redaction first (capability-independent); the inline-payload pass
+  // is gated by caps.dropInlineMediaPayloads. Fast exit only skips the
+  // block-level strip.
+  redactMentionStrings(body, sourceFormat, caps);
   if (caps.vision !== false && caps.audioInput !== false && caps.pdf !== false) return false;
 
   switch (sourceFormat) {
