@@ -35,6 +35,19 @@ function orphanedToolIds(body) {
   return ids;
 }
 
+function unpairedToolIds(body) {
+  const calls = new Set();
+  const outputs = new Set();
+  for (const m of body.messages || []) {
+    for (const tc of m.tool_calls || []) calls.add(tc.id);
+    if (m.role === "tool" && m.tool_call_id) outputs.add(m.tool_call_id);
+  }
+  return {
+    outputsWithoutCalls: [...outputs].filter((id) => !calls.has(id)),
+    callsWithoutOutputs: [...calls].filter((id) => !outputs.has(id)),
+  };
+}
+
 describe("stripHistoryForContext", () => {
   it("leaves a fitting history untouched, even when longer than HEAD_KEEP", () => {
     const body = chatBody(12);
@@ -74,6 +87,26 @@ describe("stripHistoryForContext", () => {
     wrapped(body, "cx/gpt-5.6-terra");
     expect(seen).toBe(body);
     expect(orphanedToolIds(seen)).toEqual([]);
+  });
+
+  it("drops a head tail that would keep a call but lose its tool result", () => {
+    // Real conversations start with a user turn, so a verbatim HEAD_KEEP of 6 ends on
+    // an assistant tool call (user, a, t, a, t, a). Cutting there hands the upstream a
+    // call whose result sits in the dropped middle: "No tool output found for function
+    // call ...". The head must retreat to its last complete pair.
+    const pad = "x".repeat(3000);
+    const body = { model: "m", messages: [{ role: "system", content: "sys" }, { role: "user", content: `start ${pad}` }] };
+    for (let i = 0; i < 12; i++) body.messages.push(...turn(i, `result ${i} ${pad}`));
+    body.messages.push({ role: "user", content: "lanjut" });
+
+    const out = stripHistoryForContext(body, 8000); // 25.6k budget; body is ~39k
+    expect(out).not.toBe(body);
+    expect(unpairedToolIds(out)).toEqual({ outputsWithoutCalls: [], callsWithoutOutputs: [] });
+    expect(out.messages.length).toBeLessThan(body.messages.length);
+
+    // The kept head still starts with the original user turn.
+    expect(out.messages[0].role).toBe("system");
+    expect(out.messages[1]).toEqual(body.messages[1]);
   });
 
   it("keeps Responses-shaped function_call/function_call_output pairs together", () => {

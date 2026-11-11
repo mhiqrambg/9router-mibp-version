@@ -190,6 +190,24 @@ export function stripHistoryForContext(body, contextWindow) {
     total -= lengthOf(dropped);
   }
 
+  // The head cut has the mirror problem: if it lands on an assistant turn whose tool
+  // result fell into the dropped middle (or on a tool result whose call did), the kept
+  // span holds a call without output, which strict upstreams reject with
+  // "No tool output found for function call ...". Drop trailing split messages.
+  while (head.length > 0) {
+    const headCalls = new Set();
+    const headOutputIds = new Set();
+    for (const m of head) {
+      for (const id of callIdsOf(m)) headCalls.add(id);
+      if (isToolTurn(m) && toolCallIdOf(m)) headOutputIds.add(toolCallIdOf(m));
+    }
+    const last = head[head.length - 1];
+    const splitsCall = callIdsOf(last).some((id) => !headOutputIds.has(id));
+    const splitsOutput = isToolTurn(last) && toolCallIdOf(last) && !headCalls.has(toolCallIdOf(last));
+    if (!splitsCall && !splitsOutput) break;
+    total -= lengthOf(head.pop());
+  }
+
   if (head.length === older.length && start === i + 1) return body;
   return { ...body, [key]: [...systemMsgs, ...head, ...tail] };
 }
