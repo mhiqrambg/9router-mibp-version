@@ -10,7 +10,7 @@
  */
 import { getCapabilitiesForModel } from "../providers/capabilities.js";
 
-const CAPABILITY_KEYS = ["vision", "pdf", "audioInput", "videoInput"];
+export const CAPABILITY_KEYS = ["vision", "pdf", "audioInput", "videoInput"];
 const HARD_CAPS = new Set(CAPABILITY_KEYS);
 const DEFAULT_FALLBACK_MODEL = "oc/mimo-v2.6-flash-free";
 const upgradeLegacyModel = (m) => (m === "oc/mimo-v2.5-free" ? DEFAULT_FALLBACK_MODEL : m);

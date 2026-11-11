@@ -9,7 +9,8 @@ import {
 } from "@/shared/constants/providers";
 import { getProviderConnections, getCombos, getCustomModels, getModelAliases, getSettings } from "@/lib/localDb";
 import { getDisabledModels } from "@/lib/disabledModelsDb";
-import { getKeyAccessContext, filterModelsListForKey, shouldApplyCombosOnly } from "@/sse/services/keyAccess.js";
+import { getKeyAccessContext, filterModelsListForKey, filterAdapterModels, shouldApplyCombosOnly } from "@/sse/services/keyAccess.js";
+import { CAPABILITY_KEYS, getCapacityAdapterConfig } from "open-sse/services/capacityAdapter.js";
 import { resolveKiroModels } from "open-sse/services/kiroModels.js";
 import { resolveKimchiModels } from "open-sse/services/kimchiModels.js";
 import { resolveQoderModels, routableQoderModels } from "open-sse/services/qoderModels.js";
@@ -315,6 +316,37 @@ function comboSeatLimits(combo, combosByName, visiting = new Set()) {
 }
 
 /**
+ * Fold the capacity adapter's reachable pools into each entry's advertised caps.
+ *
+ * The adapter answers an input modality the chosen model cannot read by floating a
+ * pool model to the front of the attempt (chat.js augmentModelsWithCapacityAdapter).
+ * Clients that trust the catalog strip the part before sending — an image replaced
+ * with a text description never reaches us, so the adapter has nothing to detect and
+ * the request just runs on the text-only seat. Advertise what the gateway can serve
+ * end to end, limited to pools the calling key may actually use.
+ */
+async function withAdapterCaps(list, keyAccess, kindFilter) {
+  if (!kindFilter.includes(LLM_KIND)) return list;
+  let settings;
+  try {
+    settings = await getSettings();
+  } catch {
+    return list;
+  }
+  const served = {};
+  for (const cap of CAPABILITY_KEYS) {
+    const { enabled, models: pool } = getCapacityAdapterConfig(cap, settings);
+    if (!enabled) continue;
+    const reachable = await filterAdapterModels(keyAccess, pool, []);
+    if (reachable.length > 0) served[cap] = true;
+  }
+  if (Object.keys(served).length === 0) return list;
+  return list.map((entry) =>
+    entry?.capabilities ? { ...entry, capabilities: { ...entry.capabilities, ...served } } : entry,
+  );
+}
+
+/**
  * Build OpenAI-format models list filtered by service kinds.
  * @param {string[]} kindFilter - List of service kinds to include (e.g. ["llm"], ["webSearch","webFetch"]).
  */
@@ -323,6 +355,8 @@ export async function buildModelsList(kindFilter, options = {}) {
   // 9router instance's fetchCompatibleModelIds — skip dynamic fetch to break
   // cross-instance recursive loops.
   const skipDynamicFetch = options.skipDynamicFetch === true;
+  // Calling key, so adapter pools it cannot reach are never advertised.
+  const keyAccess = options.keyAccess || null;
   let connections = [];
   try {
     connections = await getProviderConnections();
@@ -415,7 +449,7 @@ export async function buildModelsList(kindFilter, options = {}) {
   // widen COMBOS_ONLY_KINDS in keyAccess.js if more kinds gain combo UI.
   try {
     const s = await getSettings();
-    if (shouldApplyCombosOnly(kindFilter, s)) return models;
+    if (shouldApplyCombosOnly(kindFilter, s)) return withAdapterCaps(models, keyAccess, kindFilter);
   } catch {}
 
   if (connections.length === 0) {
@@ -648,7 +682,7 @@ export async function buildModelsList(kindFilter, options = {}) {
     dedupedModels.push(model);
   }
 
-  return dedupedModels;
+  return withAdapterCaps(dedupedModels, keyAccess, kindFilter);
 }
 
 /**
@@ -672,9 +706,10 @@ export async function GET(request) {
   try {
     // Detect cross-instance recursive /models fetch (another 9router fetching our /models)
     const skipDynamicFetch = request?.headers?.get(INTERNAL_MODELS_FETCH_HEADER) === "1";
+    const keyAccess = await getKeyAccessContext(request);
     const data = await filterModelsListForKey(
-      await getKeyAccessContext(request),
-      await buildModelsList([LLM_KIND], { skipDynamicFetch })
+      keyAccess,
+      await buildModelsList([LLM_KIND], { skipDynamicFetch, keyAccess })
     );
     return Response.json({ object: "list", data }, {
       headers: { "Access-Control-Allow-Origin": "*" },
