@@ -686,8 +686,15 @@ export default function APIPageClient({ machineId }) {
     }
   };
 
-  // Save a key's access (restricted flag + allow list).
+  // Save a key's access (restricted flag + allow list). Update the row
+  // optimistically so a burst of removals / "select all" never computes from a
+  // stale list; a sequence counter keeps an older response from overwriting a
+  // newer edit.
+  const accessSaveSeq = useRef(new Map());
   const handleUpdateKeyAccess = async (id, access) => {
+    const seq = (accessSaveSeq.current.get(id) || 0) + 1;
+    accessSaveSeq.current.set(id, seq);
+    setKeys(prev => prev.map(k => k.id === id ? { ...k, access } : k));
     try {
       const res = await fetch(`/api/keys/${id}`, {
         method: "PUT",
@@ -696,12 +703,22 @@ export default function APIPageClient({ machineId }) {
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok && data.key) {
-        setKeys(prev => prev.map(k => k.id === id ? { ...k, access: data.key.access } : k));
+        if (accessSaveSeq.current.get(id) === seq) {
+          setKeys(prev => prev.map(k => k.id === id ? { ...k, access: data.key.access } : k));
+        }
       } else {
         console.log("Error updating key access:", data.error || res.status);
+        if (accessSaveSeq.current.get(id) === seq) {
+          const keysRes = await fetch("/api/keys").catch(() => null);
+          if (keysRes?.ok) setKeys((await keysRes.json()).keys || []);
+        }
       }
     } catch (error) {
       console.log("Error updating key access:", error);
+      if (accessSaveSeq.current.get(id) === seq) {
+        const keysRes = await fetch("/api/keys").catch(() => null);
+        if (keysRes?.ok) setKeys((await keysRes.json()).keys || []);
+      }
     }
   };
 

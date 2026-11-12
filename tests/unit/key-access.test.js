@@ -253,6 +253,13 @@ describe("helpers: storage + validation", () => {
     expect(helpers.keyAccessToColumns({ restricted: true, allow: ["x", "X"] })).toEqual({ accessRestricted: 1, accessAllow: '["x"]' });
     expect(helpers.keyAccessToColumns({ restricted: false, allow: ["x"] })).toEqual({ accessRestricted: 0, accessAllow: "[]" });
   });
+  it("add / remove entries in one batch (select all)", () => {
+    expect(helpers.addAllowEntries([], ["a", "B", "a", "", " c "])).toEqual(["a", "B", "c"]);
+    expect(helpers.addAllowEntries(["A"], ["a", "b"])).toEqual(["A", "b"]); // case-insensitive dedupe
+    expect(helpers.addAllowEntries(["a"], ["b", "c"], 2)).toEqual(["a", "b"]); // capped
+    expect(helpers.removeAllowEntries(["Main", "cx/gpt-5"], ["main", "cx/GPT-5"])).toEqual([]);
+    expect(helpers.removeAllowEntries(["Main", "other"], ["other"])).toEqual(["Main"]);
+  });
   it("input validation rejects rather than repairs", () => {
     const v = helpers.validateKeyAccessInput;
     expect(v({ restricted: true, allow: [" Main ", "main", "cx/gpt-5"] })).toEqual({ ok: true, value: { restricted: true, allow: ["Main", "cx/gpt-5"] } });

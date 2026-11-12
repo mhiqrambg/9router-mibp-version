@@ -27,6 +27,37 @@ export function normalizeAllowList(list) {
 }
 
 /**
+ * Add entries to an allow list in one pass (the picker's "select all" hands the
+ * whole batch over): trims, de-duplicates case-insensitively against the
+ * existing list, and stops at the storage limit. Returns a new array.
+ */
+export function addAllowEntries(allow, values, limit = KEY_ACCESS_MAX_ENTRIES) {
+  const out = normalizeAllowList(allow);
+  const seen = new Set(out.map((e) => e.toLowerCase()));
+  for (const item of Array.isArray(values) ? values : [values]) {
+    if (typeof item !== "string") continue;
+    const entry = item.trim();
+    if (!entry) continue;
+    if (out.length >= limit) break;
+    const k = entry.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(entry);
+  }
+  return out;
+}
+
+/** Remove entries in one pass; matching is case-insensitive. Returns a new array. */
+export function removeAllowEntries(allow, values) {
+  const drop = new Set(
+    (Array.isArray(values) ? values : [values])
+      .filter((v) => typeof v === "string")
+      .map((v) => v.trim().toLowerCase()),
+  );
+  return normalizeAllowList(allow).filter((e) => !drop.has(e.toLowerCase()));
+}
+
+/**
  * Build the access object from the two apiKeys columns.
  *
  * Fails CLOSED: the restricted flag has its own INTEGER column, so a corrupt or
