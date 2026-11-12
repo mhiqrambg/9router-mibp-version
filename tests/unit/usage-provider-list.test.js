@@ -7,9 +7,31 @@
 // connections and zero traffic) is a leak. Regression: devin-cli showed up in
 // Usage but nowhere in Providers.
 import { describe, it, expect } from "vitest";
-import { buildUsageProviderList } from "../../src/shared/utils/usageProviders.js";
+import { buildUsageProviderList, isLLMUsageProvider } from "../../src/shared/utils/usageProviders.js";
 
 const isLLM = () => true;
+
+describe("isLLMUsageProvider", () => {
+  const registry = {
+    codex: {},
+    whisper: { serviceKinds: ["stt"] },
+    "openai-compatible-node": undefined,
+  };
+
+  it("rejects orphan connections whose provider left the registry", () => {
+    // perch-cli was removed in af79f359; its connection row survived.
+    expect(isLLMUsageProvider("perch-cli", registry, {})).toBe(false);
+  });
+
+  it("keeps custom compatible nodes via nodeNameMap", () => {
+    expect(isLLMUsageProvider("openai-compatible-node", registry, { "openai-compatible-node": "My Node" })).toBe(true);
+  });
+
+  it("applies serviceKinds when the provider is known", () => {
+    expect(isLLMUsageProvider("codex", registry, {})).toBe(true);
+    expect(isLLMUsageProvider("whisper", registry, {})).toBe(false);
+  });
+});
 
 describe("buildUsageProviderList", () => {
   it("does not auto-add hidden noAuth free providers", () => {
