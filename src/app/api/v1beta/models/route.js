@@ -1,4 +1,5 @@
-import { PROVIDER_MODELS } from "@/shared/constants/models";
+import { PROVIDER_MODELS, getModelKind } from "@/shared/constants/models";
+import { getKeyAccessContext, isProviderModelAllowedForKey } from "@/sse/services/keyAccess.js";
 
 /**
  * Handle CORS preflight
@@ -17,8 +18,9 @@ export async function OPTIONS() {
  * GET /v1beta/models - Gemini compatible models list
  * Returns models in Gemini API format
  */
-export async function GET() {
+export async function GET(request) {
   try {
+    const keyAccess = await getKeyAccessContext(request);
     const models = [];
     const seen = new Set();
 
@@ -37,6 +39,10 @@ export async function GET() {
     
     for (const [provider, providerModels] of Object.entries(PROVIDER_MODELS)) {
       for (const model of providerModels) {
+        // A restricted key sees only the catalog entries it may call.
+        const kind = getModelKind(model, "llm");
+        if (!(await isProviderModelAllowedForKey(keyAccess, provider, model.id, kind))) continue;
+
         addModel({
           name: `models/${provider}/${model.id}`,
           displayName: model.name || model.id,

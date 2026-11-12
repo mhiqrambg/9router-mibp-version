@@ -1,6 +1,7 @@
 import { PROVIDER_MODELS } from "open-sse/config/providerModels.js";
 import { AI_PROVIDERS, ALIAS_TO_ID } from "@/shared/constants/providers";
 import { getModelKind } from "@/shared/constants/models";
+import { getKeyAccessContext, isModelInfoAllowedForKey } from "@/sse/services/keyAccess.js";
 
 const KIND_ENDPOINT = {
   llm: "/v1/chat/completions",
@@ -94,6 +95,14 @@ export async function GET(request) {
     );
   }
   const info = lookup(id, kind);
+  // A restricted key may only learn metadata for targets it may call. Same 404
+  // as an unknown id so the response does not confirm that the model exists.
+  if (info && !(await isModelInfoAllowedForKey(await getKeyAccessContext(request), info))) {
+    return Response.json(
+      { error: { message: `Model not found: ${id}`, type: "not_found" } },
+      { status: 404, headers: { "Access-Control-Allow-Origin": "*" } },
+    );
+  }
   if (!info) {
     return Response.json(
       { error: { message: `Model not found: ${id}`, type: "not_found" } },

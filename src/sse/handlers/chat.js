@@ -27,8 +27,9 @@ import * as log from "../utils/logger.js";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
 import { getProjectIdForConnection } from "open-sse/services/projectId.js";
 import { stripModelContextMarker } from "open-sse/utils/modelMarkers.js";
-import { getKeyAccessContext, enforceKeyAccess, filterAdapterModels, enforceCombosOnly } from "../services/keyAccess.js";
+import { getKeyAccessContext, enforceKeyAccess, filterAdapterModels, enforceCombosOnly, isModelAllowedForKey } from "../services/keyAccess.js";
 import { resolveSmartChoice } from "../services/systemoneRouter.js";
+import { DEFAULT_SYSTEMONE_ROUTER_MODEL } from "open-sse/services/systemoneRouter.js";
 
 /**
  * Handle chat completion request
@@ -121,6 +122,10 @@ export async function handleChat(request, clientRawRequest = null) {
 
     if (comboStrategy === "fusion") {
       log.info("CHAT", `Combo "${modelStr}" with ${comboModels.length} models (strategy: fusion)`);
+      const judgeModel = comboStrategies[modelStr]?.judgeModel;
+      // The judge runs on the client's behalf; a restricted key must not reach
+      // a model outside its allow list. Omitting it falls back to panel[0].
+      const judgeAllowed = await isModelAllowedForKey(keyAccess, judgeModel);
       return handleFusionChat({
         body,
         models: comboModels,
@@ -134,13 +139,15 @@ export async function handleChat(request, clientRawRequest = null) {
         },
         log,
         comboName: modelStr,
-        judgeModel: comboStrategies[modelStr]?.judgeModel,
+        judgeModel: judgeAllowed ? judgeModel : undefined,
         tuning: comboStrategies[modelStr]?.fusionTuning,
       });
     }
 
     const comboStickyLimit = settings.comboStickyRoundRobinLimit;
     const comboCfg = comboStrategies[modelStr] || {};
+    const routerModel = comboCfg.routerModel || DEFAULT_SYSTEMONE_ROUTER_MODEL;
+    const routerAllowed = await isModelAllowedForKey(keyAccess, routerModel);
     log.info("CHAT", `Combo "${modelStr}" with ${augmentedModels.length} models (strategy: ${comboStrategy}, sticky: ${comboStickyLimit})`);
     return handleComboChat({
       body,
@@ -157,11 +164,11 @@ export async function handleChat(request, clientRawRequest = null) {
       smartPolicy: comboCfg.smartPolicy || "smart",
       sessionSticky: comboCfg.sessionSticky !== false,
       confidenceThreshold: typeof comboCfg.confidenceThreshold === "number" ? comboCfg.confidenceThreshold : 0.8,
-      resolveSmartChoice: comboStrategy === "smart"
+      resolveSmartChoice: comboStrategy === "smart" && routerAllowed
         ? (b, m) => resolveSmartChoice({
             body: b,
             models: m,
-            routerModel: comboCfg.routerModel,
+            routerModel,
             log,
           })
         : null,
@@ -214,6 +221,8 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
 
       if (comboStrategy === "fusion") {
         log.info("CHAT", `Combo "${modelStr}" with ${comboModels.length} models (strategy: fusion)`);
+        const judgeModel = comboStrategies[modelStr]?.judgeModel;
+        const judgeAllowed = await isModelAllowedForKey(keyAccess, judgeModel);
         return handleFusionChat({
           body,
           models: comboModels,
@@ -227,13 +236,15 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
           },
           log,
           comboName: modelStr,
-          judgeModel: comboStrategies[modelStr]?.judgeModel,
+          judgeModel: judgeAllowed ? judgeModel : undefined,
           tuning: comboStrategies[modelStr]?.fusionTuning,
         });
       }
 
       const comboStickyLimit = chatSettings.comboStickyRoundRobinLimit;
       const comboCfg = comboStrategies[modelStr] || {};
+      const routerModel = comboCfg.routerModel || DEFAULT_SYSTEMONE_ROUTER_MODEL;
+      const routerAllowed = await isModelAllowedForKey(keyAccess, routerModel);
       const nestedSession = resolveSessionIdentity({ headers: clientRawRequest?.headers, body });
       const nestedSessionId = nestedSession?.sessionId || null;
       log.info("CHAT", `Combo "${modelStr}" with ${augmentedModels.length} models (strategy: ${comboStrategy}, sticky: ${comboStickyLimit})`);
@@ -252,11 +263,11 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
         smartPolicy: comboCfg.smartPolicy || "smart",
         sessionSticky: comboCfg.sessionSticky !== false,
         confidenceThreshold: typeof comboCfg.confidenceThreshold === "number" ? comboCfg.confidenceThreshold : 0.8,
-        resolveSmartChoice: comboStrategy === "smart"
+        resolveSmartChoice: comboStrategy === "smart" && routerAllowed
           ? (b, m) => resolveSmartChoice({
               body: b,
               models: m,
-              routerModel: comboCfg.routerModel,
+              routerModel,
               log,
             })
           : null,

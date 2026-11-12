@@ -44,7 +44,7 @@ async function status(k, model) {
 beforeEach(() => {
   fx.keys = {};
   key("open", { restricted: false, allow: [] });
-  key("combo", { restricted: true, allow: ["main"] }); // case differs from combo "Main" on purpose
+  key("combo", { restricted: true, allow: ["Main"] });
   key("b", { restricted: true, allow: ["openai/MODEL-B"] });
   key("empty", { restricted: true, allow: [] });
   key("cx", { restricted: true, allow: ["cx/gpt-5"] });
@@ -129,8 +129,18 @@ describe("case-insensitivity", () => {
     expect(await status("sk-b", "openai/Model-B")).toBe(200);
     expect(await status("sk-b", "OpenAI/model-b")).toBe(200);
   });
-  it("matches combo names case-insensitively (allow 'main' grants combo 'Main')", async () => {
+  it("matches listed combo names exactly", async () => {
     expect(await status("sk-combo", "Main")).toBe(200);
+    expect(await status("sk-combo", "main")).toBe(403);
+  });
+  it("a listed combo does not grant a case-variant combo", async () => {
+    fx.combos.push({ id: "c3", name: "main", models: ["openai/model-c"] });
+    try {
+      expect(await status("sk-combo", "Main")).toBe(200);
+      expect(await status("sk-combo", "main")).toBe(403);
+    } finally {
+      fx.combos.pop();
+    }
   });
 });
 
@@ -169,6 +179,29 @@ describe("provider-as-model (search / fetch)", () => {
     expect((await engine.enforceKeyAccessProvider(ctx, "exa", null)).status).toBe(403);
     expect(await engine.enforceKeyAccessProvider(ctx, "Main", ["tavily"])).toBeNull();
     expect((await engine.enforceKeyAccessProvider(ctx, "other", ["exa"])).status).toBe(403);
+  });
+});
+
+describe("video poll provider gate", () => {
+  it("allows a listed provider or a provider owning an allowed model", async () => {
+    expect(await engine.enforceKeyAccessVideoProvider(await ctxFor("sk-tavily"), "tavily")).toBeNull();
+    expect(await engine.enforceKeyAccessVideoProvider(await ctxFor("sk-b"), "openai")).toBeNull();
+    expect((await engine.enforceKeyAccessVideoProvider(await ctxFor("sk-b"), "xai")).status).toBe(403);
+    expect((await engine.enforceKeyAccessVideoProvider(await ctxFor("sk-empty"), "xai")).status).toBe(403);
+  });
+  it("is a no-op without a restricted key", async () => {
+    expect(await engine.enforceKeyAccessVideoProvider(null, "xai")).toBeNull();
+  });
+});
+
+describe("model metadata gate", () => {
+  it("allows only records the key may call", async () => {
+    const ctx = await ctxFor("sk-b");
+    expect(await engine.isModelInfoAllowedForKey(ctx, { id: "openai/model-b", kind: "llm", owned_by: "openai" })).toBe(true);
+    expect(await engine.isModelInfoAllowedForKey(ctx, { id: "openai/model-a", kind: "llm", owned_by: "openai" })).toBe(false);
+    expect(await engine.isProviderModelAllowedForKey(ctx, "openai", "model-b", "llm")).toBe(true);
+    expect(await engine.isProviderModelAllowedForKey(ctx, "openai", "model-a", "llm")).toBe(false);
+    expect(await engine.isModelInfoAllowedForKey(null, { id: "openai/model-a" })).toBe(true);
   });
 });
 

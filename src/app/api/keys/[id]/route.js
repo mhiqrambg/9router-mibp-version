@@ -30,7 +30,12 @@ export async function PUT(request, { params }) {
     }
 
     const updateData = {};
-    if (isActive !== undefined) updateData.isActive = isActive;
+    if (isActive !== undefined) {
+      if (typeof isActive !== "boolean") {
+        return NextResponse.json({ error: "isActive must be a boolean" }, { status: 400 });
+      }
+      updateData.isActive = isActive;
+    }
     if (access !== undefined) {
       const checked = validateKeyAccessInput(access);
       if (!checked.ok) return NextResponse.json({ error: checked.error }, { status: 400 });

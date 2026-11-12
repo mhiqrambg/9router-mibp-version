@@ -1,4 +1,5 @@
 import { AI_PROVIDERS } from "@/shared/constants/providers";
+import { getKeyAccessContext, isProviderAllowedForKey, keyAccessDeniedResponse } from "@/sse/services/keyAccess.js";
 
 // Provider → internal voices API. Edge/local-device share the generic endpoint.
 const PROVIDER_API = {
@@ -28,6 +29,13 @@ export async function GET(request) {
         { error: { message: `provider must be one of: ${Object.keys(PROVIDER_API).join(", ")}`, type: "invalid_request_error" } },
         { status: 400, headers: { "Access-Control-Allow-Origin": "*" } },
       );
+    }
+
+    const keyAccess = await getKeyAccessContext(request);
+    // Voice lists are provider metadata: a restricted key may only query
+    // providers it may call (voice listing alone must not reveal others).
+    if (!(await isProviderAllowedForKey(keyAccess, provider))) {
+      return keyAccessDeniedResponse(keyAccess, `${provider} voices`);
     }
 
     const baseUrl = PROVIDER_API[provider](origin);
