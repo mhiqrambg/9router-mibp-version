@@ -3,6 +3,7 @@ import { resolveConnectionProxyConfig, pickProxyPoolId } from "@/lib/network/con
 import { formatRetryAfter, checkFallbackError, isModelLockActive, buildModelLockUpdate, getEarliestModelLockUntil } from "open-sse/services/accountFallback.js";
 import { MAX_RATE_LIMIT_COOLDOWN_MS } from "open-sse/config/errorConfig.js";
 import { resolveProviderId, FREE_PROVIDERS } from "@/shared/constants/providers.js";
+import { MODEL_ASSIGNMENT_ALL } from "@/shared/constants/modelAssignment.js";
 import { getAntigravityQuotaCache, getAntigravityModelQuota } from "./antigravityQuota.js";
 import * as log from "../utils/logger.js";
 
@@ -17,7 +18,7 @@ export function filterConnectionsForModel(providerId, connections, model, settin
   return connections.filter((connection) => {
     const assignedModel = connection.providerSpecificData?.assignedModel
       || (providerId === "freebuff" ? connection.providerSpecificData?.freebuffModel : null);
-    return assignedModel === model;
+    return assignedModel === MODEL_ASSIGNMENT_ALL || assignedModel === model;
   });
 }
 

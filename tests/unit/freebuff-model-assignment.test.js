@@ -28,6 +28,29 @@ describe("Freebuff strict model assignment", () => {
     expect(filterConnectionsForModel("freebuff", connections, "mimo/mimo-v2.5", {})).toBe(connections);
   });
 
+  it("lets an All-models connection serve any requested model", () => {
+    const settings = { providerStrategies: { freebuff: { strictModelAssignment: true } } };
+    const withWildcard = [
+      ...connections,
+      { id: "all-1", providerSpecificData: { assignedModel: "*" } },
+    ];
+
+    expect(filterConnectionsForModel("freebuff", withWildcard, "mimo/mimo-v2.5", settings).map((c) => c.id))
+      .toEqual(["mimo-1", "all-1"]);
+    expect(filterConnectionsForModel("freebuff", withWildcard, "unlisted/model", settings).map((c) => c.id))
+      .toEqual(["all-1"]);
+  });
+
+  it("honors the All-models sentinel for non-freebuff providers", () => {
+    const result = filterConnectionsForModel("codex", [
+      { id: "pinned", providerSpecificData: { assignedModel: "gpt-5" } },
+      { id: "all", providerSpecificData: { assignedModel: "*" } },
+      { id: "off", providerSpecificData: {} },
+    ], "gpt-5-mini", { providerStrategies: { codex: { strictModelAssignment: true } } });
+
+    expect(result.map((c) => c.id)).toEqual(["all"]);
+  });
+
   it("does not affect other providers when their toggle is off", () => {
     expect(filterConnectionsForModel("codex", connections, "mimo/mimo-v2.5", {
       providerStrategies: {},

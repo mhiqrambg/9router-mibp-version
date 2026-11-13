@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { getStatusVariant as getConnectionStatusVariant } from "@/shared/utils/connectionStatus";
+import { MODEL_ASSIGNMENT_ALL } from "@/shared/constants/modelAssignment";
 import PropTypes from "prop-types";
 import { Badge, Toggle, Tooltip } from "@/shared/components";
 import CooldownTimer from "./CooldownTimer";
@@ -329,6 +330,7 @@ export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst
                title="Model assignment"
              >
                <option value="">Unassigned</option>
+               <option value={MODEL_ASSIGNMENT_ALL}>All models</option>
                {modelAssignmentOptions.map((model) => (
                 <option key={model.id} value={model.id}>{model.name || model.id}</option>
               ))}

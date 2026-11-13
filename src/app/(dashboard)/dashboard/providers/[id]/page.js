@@ -1723,7 +1723,7 @@ export default function ProviderDetailPage() {
               <div className="flex flex-wrap items-center gap-2 border-t border-black/[0.03] pt-2 dark:border-white/[0.03]">
                 <div>
                   <span className="text-xs text-text-muted font-medium">Strict Model Assignment</span>
-                  <p className="text-[10px] text-text-muted">Only assigned accounts can serve each model for this provider.</p>
+                  <p className="text-[10px] text-text-muted">Only assigned accounts can serve each model for this provider. Unassigned accounts serve none; pick All models to let an account serve every model.</p>
                 </div>
                 <Toggle checked={strictModelAssignment} onChange={handleStrictAssignmentToggle} />
               </div>
