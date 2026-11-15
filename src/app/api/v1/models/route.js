@@ -200,14 +200,43 @@ function inferKindFromUnknownModelId(modelId) {
   return LLM_KIND;
 }
 
+// Fetch a compatible provider's live /models catalog.
+//
+// Each entry keeps the upstream capability fields (capabilities / caps,
+// architecture.input_modalities, context_length / contextWindow,
+// max_output_tokens / maxOutput) and the per-model service kind. Callers
+// consume [0] for ids and [1] for id→caps / id→kind maps, so a gateway that
+// advertises a real 1M window is published at 1M instead of the 200k floor
+// the static table guesses.
+function liveCapabilities(model) {
+  const raw = model?.capabilities || model?.caps || {};
+  const arch = model?.architecture || {};
+  const caps = {};
+  const ctx = raw.contextWindow ?? raw.context_length ?? model?.context_length ?? model?.contextWindow;
+  const maxOut = raw.maxOutput ?? raw.max_output_tokens ?? model?.max_output_tokens ?? model?.maxOutput ?? model?.max_completion_tokens;
+  if (Number.isFinite(ctx) && ctx > 0) caps.contextWindow = ctx;
+  if (Number.isFinite(maxOut) && maxOut > 0) caps.maxOutput = maxOut;
+  for (const key of ["vision", "pdf", "audioInput", "videoInput", "reasoning", "tools", "search", "imageOutput", "audioOutput"]) {
+    if (typeof raw[key] === "boolean") caps[key] = raw[key];
+  }
+  const input = Array.isArray(arch.input_modalities) ? arch.input_modalities
+    : Array.isArray(model?.input_modalities) ? model.input_modalities : null;
+  if (input) {
+    if (input.includes("image")) caps.vision = true;
+    if (input.includes("audio")) caps.audioInput = true;
+    if (input.includes("video")) caps.videoInput = true;
+  }
+  return Object.keys(caps).length > 0 ? caps : null;
+}
+
 async function fetchCompatibleModelIds(connection) {
-  if (!connection?.apiKey) return [];
+  if (!connection?.apiKey) return [[], new Map(), new Map()];
 
   const baseUrl = typeof connection?.providerSpecificData?.baseUrl === "string"
     ? connection.providerSpecificData.baseUrl.trim().replace(/\/$/, "")
     : "";
 
-  if (!baseUrl) return [];
+  if (!baseUrl) return [[], new Map(), new Map()];
 
   let url = `${baseUrl}/models`;
   const headers = {
@@ -226,7 +255,7 @@ async function fetchCompatibleModelIds(connection) {
     headers["anthropic-version"] = "2023-06-01";
     headers.Authorization = `Bearer ${connection.apiKey}`;
   } else {
-    return [];
+    return [[], new Map(), new Map()];
   }
 
   try {
@@ -240,20 +269,26 @@ async function fetchCompatibleModelIds(connection) {
     });
     clearTimeout(timeoutId);
 
-    if (!response.ok) return [];
+    if (!response.ok) return [[], new Map(), new Map()];
 
     const data = await response.json();
     const rawModels = parseOpenAIStyleModels(data);
 
-    return Array.from(
-      new Set(
-        rawModels
-          .map((model) => model?.id || model?.name || model?.model)
-          .filter((modelId) => typeof modelId === "string" && modelId.trim() !== "")
-      )
-    );
+    const ids = [];
+    const capsById = new Map();
+    const kindById = new Map();
+    for (const model of rawModels) {
+      const id = model?.id || model?.name || model?.model;
+      if (typeof id !== "string" || id.trim() === "") continue;
+      if (!ids.includes(id)) ids.push(id);
+      const caps = liveCapabilities(model);
+      if (caps && !capsById.has(id)) capsById.set(id, caps);
+      const kind = modelKind(model);
+      if (!kindById.has(id)) kindById.set(id, kind);
+    }
+    return [ids, capsById, kindById];
   } catch {
-    return [];
+    return [[], new Map(), new Map()];
   }
 }
 
@@ -522,7 +557,10 @@ export async function buildModelsList(kindFilter, options = {}) {
         : providerModels.map((model) => model.id);
 
       if (isCompatibleProvider && rawModelIds.length === 0 && !skipDynamicFetch) {
-        rawModelIds = await fetchCompatibleModelIds(conn);
+        const [ids, capsById, kindById] = await fetchCompatibleModelIds(conn);
+        rawModelIds = ids;
+        if (capsById.size > 0) liveCapabilitiesById = capsById;
+        if (kindById.size > 0) liveModelKindById = kindById;
       }
 
       // Config-driven live catalog override (e.g. Kiro returns dynamic

@@ -28,8 +28,10 @@ tests/unit/combo-autoswitch.test.js :: detectRequiredCapabilities web_search too
 tests/unit/combo-autoswitch.test.js :: reorderByCapabilities keeps order when no model matches
 
 # Live call: the upstream now answers "Unsupported model mimo-auto", the only model the
-# (hidden since 6d96e24b) mimo-free / mmf providers list.
-tests/unit/mimo-free.live.test.js :: MiMo Free anti-abuse gate (live) chat WITH Chrome User-Agent → 200
+# (hidden since 6d96e24b) mimo-free / mmf providers list. Renamed to *.real.test.js so it
+# stays out of the default `vitest run` (it hits real endpoints); run it explicitly with
+# `npx vitest run --config tests/vitest.config.js unit/mimo-free.real.test.js` from tests/.
+tests/unit/mimo-free.real.test.js :: MiMo Free anti-abuse gate (live) chat WITH Chrome User-Agent → 200
 
 # Cannot load in this repo: benchmarks lowdb (removed in bee8dad9) / imports the cloud/ worker,
 # which is not part of this repository.

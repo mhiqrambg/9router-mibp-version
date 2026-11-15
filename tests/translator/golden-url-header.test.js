@@ -31,8 +31,19 @@ const SPECIALIZED = new Set([
   "xiaomi-tokenplan", "mimo-free",
 ]);
 
-// Per-process / per-request values: kimi's random device name, minimax's session UUID.
-const VOLATILE_HEADERS = new Set(["x-msh-device-name", "x-mavis-session-id"]);
+// Per-process / per-request values that change on every call: kimi's random
+// device name, minimax's session UUID, and the CodeBuddy conversation /
+// request identifiers (randomUUID() per request in HEADER_HOOKS.codebuddyHeaders,
+// default.js). Left un-normalized they made the codebuddy-cn / codebuddy-intl
+// golden snapshots fail on every run.
+const VOLATILE_HEADERS = new Set([
+  "x-msh-device-name",
+  "x-mavis-session-id",
+  "x-request-id",
+  "x-conversation-id",
+  "x-conversation-request-id",
+  "x-conversation-message-id",
+]);
 
 // Machine-derived values: OS/arch (kimi device model) and local timezone
 // (minimax session offset). Normalised so the snapshot is portable.
