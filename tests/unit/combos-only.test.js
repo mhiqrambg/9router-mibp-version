@@ -68,10 +68,11 @@ describe("combos-only helpers", () => {
     expect(keyAccess.isCombosOnlyEnabled({ combosOnly: false })).toBe(false);
     expect(keyAccess.shouldApplyCombosOnly(["llm"], {})).toBe(false);
   });
-  it("applies to llm + web, not media kinds", () => {
+  it("applies to llm only — web and media kinds are out of scope", () => {
     const on = { combosOnly: true };
     expect(keyAccess.shouldApplyCombosOnly(["llm"], on)).toBe(true);
-    expect(keyAccess.shouldApplyCombosOnly(["webSearch", "webFetch"], on)).toBe(true);
+    expect(keyAccess.shouldApplyCombosOnly(["webSearch"], on)).toBe(false);
+    expect(keyAccess.shouldApplyCombosOnly(["webSearch", "webFetch"], on)).toBe(false);
     expect(keyAccess.shouldApplyCombosOnly(["image"], on)).toBe(false);
     expect(keyAccess.shouldApplyCombosOnly(["tts"], on)).toBe(false);
     expect(keyAccess.shouldApplyCombosOnly(["llm", "image"], on)).toBe(false);

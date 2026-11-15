@@ -444,9 +444,11 @@ export async function buildModelsList(kindFilter, options = {}) {
     models.push(entry);
   }
 
-  // Combos-only mode: expose just combos for LLM + web kinds. Media kinds
-  // without combo creation UI stay untouched. shortcut: per-kind allowlist,
-  // widen COMBOS_ONLY_KINDS in keyAccess.js if more kinds gain combo UI.
+  // Combos-only mode: expose just combos for the LLM kind. Web kinds
+  // (search/fetch) and media kinds are untouched — the toggle hides model ids
+  // and rejects direct model calls, and a search provider id is not a model.
+  // shortcut: per-kind allowlist, widen COMBOS_ONLY_KINDS in keyAccess.js if
+  // another kind ever gains the same semantics.
   try {
     const s = await getSettings();
     if (shouldApplyCombosOnly(kindFilter, s)) return withAdapterCaps(models, keyAccess, kindFilter);

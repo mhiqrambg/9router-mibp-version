@@ -4,13 +4,21 @@
 //                      (401) before it does any work, even when the caller is
 //                      a restricted key.
 //   Combos only      → only combo names are listed in /v1/models and only combo
-//                      names are executable, for the kinds that have combo UI
-//                      (llm, webSearch, webFetch). Raw provider/model ids get
-//                      404. Media kinds (image/tts/stt/embedding/video) are out
-//                      of scope by design — they have no combo UI.
+//                      names are executable for the LLM kind. Raw model ids get
+//                      404. Web (search/fetch) and media kinds
+//                      (image/tts/stt/embedding/video) are out of scope: the
+//                      toggle is about model ids, and a search provider id is
+//                      not a model.
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const fx = vi.hoisted(() => ({
+  // Active connections decide what /v1/models lists: the raw web entries
+  // (exa/search, firecrawl/fetch) only appear when their providers are
+  // connected, which is what makes the web carve-out observable.
+  connections: [
+    { id: "p1", provider: "exa", isActive: true, authType: "apikey", data: "{}" },
+    { id: "p2", provider: "firecrawl", isActive: true, authType: "apikey", data: "{}" },
+  ],
   combos: [
     { id: "c1", name: "Main", models: ["openai/model-a", "openai/model-b"] },
     { id: "c2", name: "search-combo", kind: "webSearch", models: ["tavily"] },
@@ -33,7 +41,7 @@ vi.mock("@/lib/localDb", () => ({
   getCustomModels: async () => [],
   getComboByName: async (name) => fx.combos.find((c) => c.name === name) || null,
   getProviderNodes: async () => [],
-  getProviderConnections: async () => [],
+  getProviderConnections: async () => fx.connections,
 }));
 vi.mock("@/lib/db/repos/combosRepo.js", () => ({ getCombos: async () => fx.combos }));
 vi.mock("@/lib/db/repos/apiKeysRepo.js", () => ({ getApiKeyByKey: async (k) => fx.keys[k] || null }));
@@ -116,33 +124,34 @@ describe("Require API key", () => {
   });
 });
 
-describe("Combos only", () => {
-  it("lists only combos for the llm + web kinds", async () => {
+describe("Combos only (LLM kind)", () => {
+  const models = async (kind) => {
     const { buildModelsList } = await import("../../src/app/api/v1/models/route.js");
-    const llm = (await buildModelsList(["llm"], {})).map((m) => m.id);
-    expect(llm).toEqual(["Main", "claude-3.7-sonnet"]);
-    const web = (await buildModelsList(["webSearch", "webFetch"], {})).map((m) => m.id);
-    expect(web).toEqual(["search-combo", "fetch-combo"]);
+    return buildModelsList(kind, {});
+  };
+
+  it("lists only combos for the llm kind", async () => {
+    expect((await models(["llm"])).map((m) => m.id)).toEqual(["Main", "claude-3.7-sonnet"]);
   });
 
-  it("a web kind keeps its kind tag so the combo is routable on /v1/search", async () => {
-    const { buildModelsList } = await import("../../src/app/api/v1/models/route.js");
-    const web = await buildModelsList(["webSearch"], {});
-    expect(web.map((m) => m.kind)).toEqual(["webSearch"]);
+  it("leaves the web kinds fully listed (raw provider search/fetch entries stay)", async () => {
+    const web = await models(["webSearch", "webFetch"]);
+    const ids = web.map((m) => m.id);
+    expect(ids).toContain("exa/search");
+    expect(ids).toContain("firecrawl/fetch");
+    expect(ids).toEqual(expect.arrayContaining(["search-combo", "fetch-combo"]));
+    // the web combos keep their kind tag so a client can route them by kind
+    expect(web.filter((m) => m.owned_by === "combo").map((m) => m.kind)).toEqual(["webSearch", "webFetch"]);
   });
 
-  it("media kinds are untouched (no combo UI there)", async () => {
-    const { buildModelsList } = await import("../../src/app/api/v1/models/route.js");
-    const emb = await buildModelsList(["embedding"], {});
-    expect(emb.length).toBeGreaterThan(0);
-  });
-
-  it("executes a web combo by name and hides the raw provider (404)", async () => {
-    expect((await search({ model: "search-combo", query: "q" }, "sk-open")).status).toBe(200);
-    const denied = await search({ model: "tavily", query: "q" }, "sk-open");
-    expect(denied.status).toBe(404);
-    expect((await denied.json()).error.message).toContain("tavily");
-    expect(core.handleSearchCore).toHaveBeenCalledTimes(1);
+  it("never applies to media kinds (embedding stays listed, combos-only is llm-only)", async () => {
+    const keyAccess = await import("../../src/sse/services/keyAccess.js");
+    const on = { combosOnly: true };
+    expect(keyAccess.shouldApplyCombosOnly(["embedding"], on)).toBe(false);
+    expect(keyAccess.shouldApplyCombosOnly(["image", "tts", "stt", "video"], on)).toBe(false);
+    expect(keyAccess.shouldApplyCombosOnly(["webSearch"], on)).toBe(false);
+    expect(keyAccess.shouldApplyCombosOnly(["webSearch", "webFetch"], on)).toBe(false);
+    expect(keyAccess.shouldApplyCombosOnly(["llm"], on)).toBe(true);
   });
 
   it("hides a raw LLM model but keeps the same combo name callable", async () => {
@@ -151,16 +160,27 @@ describe("Combos only", () => {
     expect(chatCore.handleChatCore).toHaveBeenCalledTimes(1);
   });
 
-  it("with the toggle off, raw provider and model ids are callable again", async () => {
+  it("does not touch /v1/search: the raw provider still runs and the combo still works", async () => {
+    const raw = await search({ model: "tavily", query: "q" }, "sk-open");
+    expect(raw.status).toBe(200);
+    expect((await search({ model: "search-combo", query: "q" }, "sk-open")).status).toBe(200);
+    expect(core.handleSearchCore).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not touch /v1/web/fetch: the raw provider still runs", async () => {
+    const r = await fetchWeb({ model: "firecrawl", url: "https://example.com" }, "sk-open");
+    expect(r.status).not.toBe(404);
+  });
+
+  it("with the toggle off, raw LLM model ids are callable again", async () => {
     fx.settings = { requireApiKey: false, combosOnly: false, comboStrategy: "fallback" };
-    expect((await search({ model: "tavily", query: "q" }, "sk-open")).status).toBe(200);
     expect((await chat({ model: "openai/model-a", messages: [] }, "sk-open")).status).toBe(200);
   });
 
-  it("both toggles together: the restricted key still gets 403 before combos-only", async () => {
-    // sk-web is allowed only "search-combo"; an unlisted provider must be a 403
-    // (key access) rather than the combos-only 404 — the key gate runs first.
-    const r = await search({ model: "exa", query: "q" }, "sk-web");
+  it("key access still wins over the LLM gate for a restricted key", async () => {
+    // sk-web may call only "search-combo", so an LLM combo is a 403 (key gate),
+    // not the combos-only 404 — the key gate runs first.
+    const r = await chat({ model: "Main", messages: [] }, "sk-web");
     expect(r.status).toBe(403);
   });
 });

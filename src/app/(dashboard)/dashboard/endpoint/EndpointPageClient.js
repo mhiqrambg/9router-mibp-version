@@ -1047,7 +1047,7 @@ export default function APIPageClient({ machineId }) {
           <div>
             <p className="font-medium">Combos only</p>
             <p className="text-sm text-text-muted">
-              Expose only combos in /v1/models and reject direct model calls
+              Expose only combos in /v1/models and reject direct LLM model calls
             </p>
           </div>
           <Toggle

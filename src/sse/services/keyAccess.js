@@ -273,9 +273,11 @@ export function isCombosOnlyEnabled(settings) {
   return settings?.combosOnly === true;
 }
 
-// Combos-only applies to LLM + web kinds (the ones with combo UI). Media
-// kinds without combo creation UI (image/tts/stt/embedding/...) stay untouched.
-const COMBOS_ONLY_KINDS = new Set(["llm", "webSearch", "webFetch"]);
+// Combos-only covers the LLM/chat kind only. Web search/fetch combos exist
+// (kind: webSearch/webFetch on media-providers/web) but the toggle is about
+// /v1/models model ids and direct model calls; a search provider id is not a
+// model, so hiding it there would break working search clients for no gain.
+const COMBOS_ONLY_KINDS = new Set(["llm"]);
 
 export function shouldApplyCombosOnly(kindFilter, settings) {
   if (!isCombosOnlyEnabled(settings)) return false;
@@ -291,7 +293,10 @@ export function combosOnlyDeniedResponse(requested) {
   );
 }
 
-/** Gate for combo-capable endpoints (chat, image, tts, search/fetch via comboModels). */
+/**
+ * Gate for the LLM endpoint (chat, responses, messages, Gemini-native).
+ * Not applied to /v1/search or /v1/web/fetch — see COMBOS_ONLY_KINDS.
+ */
 export function enforceCombosOnly(requested, comboModels, settings) {
   if (!isCombosOnlyEnabled(settings)) return null;
   if (comboModels) return null;
