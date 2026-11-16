@@ -11,7 +11,7 @@
 // the map cannot live in module scope: the route bundle's refresh would update
 // a copy the installed reader never sees. Both the map and the installed source
 // therefore go through globalThis slots, which every chunk copy shares.
-import { getCustomModels } from "../localDb.js";
+import { getCustomModels, getProviderNodes } from "../localDb.js";
 import { setCustomCapsSource } from "open-sse/providers/capabilities.js";
 import { buildCapsLookup, lookupCaps } from "open-sse/providers/customCaps.js";
 import { PROVIDER_ID_TO_ALIAS } from "open-sse/config/providerModels.js";
@@ -34,14 +34,42 @@ function installSource() {
   });
 }
 
+// Build node-ID → display-name map so custom-model rows stored under an
+// OpenAI-compatible node UUID (e.g. "openai-compatible-chat-1cc3d74e-…") can
+// also be found by the provider display name (e.g. "NUTARALINE") that the
+// request-time handler passes to getCapabilitiesForModel.
+async function loadNodeIdToName() {
+  try {
+    const nodes = await getProviderNodes();
+    const map = new Map();
+    for (const n of nodes || []) {
+      if (n?.id && n?.name) map.set(n.id, n.name);
+    }
+    return map;
+  } catch {
+    return new Map();
+  }
+}
+
 async function load() {
   try {
-    const rows = await getCustomModels();
+    const [rows, nodeIdToName] = await Promise.all([getCustomModels(), loadNodeIdToName()]);
     // STT rows carry type-specific settings, not chat capabilities; indexing
     // their toggles would shadow an llm row with the same model id.
     const chatRows = rows
       .filter((row) => (row?.type || row?.kind || "llm") !== "stt")
-      .map((row) => ({ ...row, providerId: ALIAS_TO_PROVIDER_ID[row?.providerAlias] || row?.providerAlias }));
+      .map((row) => {
+        // Resolve canonical provider id from alias, or fall back to raw value.
+        const resolvedProviderId = ALIAS_TO_PROVIDER_ID[row?.providerAlias] || row?.providerAlias;
+        // For OpenAI-compatible nodes the providerAlias IS the node UUID; also
+        // expose the node display name so request-time lookups by name succeed.
+        const nodeName = nodeIdToName.get(row?.providerAlias) || null;
+        return {
+          ...row,
+          providerId: resolvedProviderId,
+          ...(nodeName ? { providerName: nodeName } : {}),
+        };
+      });
     globalThis[MAP_SLOT] = buildCapsLookup(chatRows);
   } catch (error) {
     // A DB hiccup must not break routing: keep the previous lookup in place.

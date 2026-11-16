@@ -472,6 +472,14 @@ PROVIDER_CAPABILITIES.devin = PROVIDER_CAPABILITIES["devin-cli"];
 // The global mcode site serves the same catalog — share the capability table.
 PROVIDER_CAPABILITIES["minimax-code-global"] = PROVIDER_CAPABILITIES["minimax-code"];
 
+// NUTARALINE gateway — models.dev reports vision for some models (ernie-5.5-flash-preview)
+// but the lane rejects image parts with 400 `vision_not_supported`. Force text-only
+// so stripUnsupportedModalities strips images before dispatch, matching the
+// *1017*flex* pattern used for the nutaraline DeepSeek flex lane.
+PROVIDER_CAPABILITIES["nutaraline"] = {
+  "ernie-5.5-flash-preview": { vision: false, reasoning: true, thinkingFormat: "openai", contextWindow: 128000, maxOutput: 32000 },
+};
+
 /**
  * Pattern fallback — glob (* = wildcard), matched case-insensitively and
  * anchored (^...$) so a pattern must match the full model id. ORDER MATTERS:
@@ -896,9 +904,10 @@ function resolveModelCapabilities(provider, model) {
     };
   }
 
-  // 1. Provider-specific override
+  // 1. Provider-specific override (case-insensitive: provider IDs may be
+  //    stored uppercase, e.g. "NUTARALINE", while keys here are lowercase).
   if (provider) {
-    const providerCaps = PROVIDER_CAPABILITIES[provider];
+    const providerCaps = PROVIDER_CAPABILITIES[provider] ?? PROVIDER_CAPABILITIES[provider.toLowerCase()];
     if (providerCaps?.[model]) return { ...DEFAULT_CAPABILITIES, ...providerCaps[model] };
     if (providerCaps?.[baseModel]) return { ...DEFAULT_CAPABILITIES, ...providerCaps[baseModel] };
   }

@@ -7,8 +7,8 @@ import { getProviderCustomModelRows } from "@/shared/utils/providerCustomModels"
 import EditModelCapsModal from "./EditModelCapsModal";
 
 const CAP_CHIPS = [
-  { key: "vision", label: "Vision" },
-  { key: "reasoning", label: "Reasoning" },
+  { key: "vision", icon: "visibility", label: "Vision" },
+  { key: "reasoning", icon: "neurology", label: "Reasoning" },
 ];
 
 function CompatibleModelRow({ modelId, fullModel, copied, onCopy, onDeleteAlias, onTest, testStatus, isTesting, caps, onEdit }) {
@@ -39,7 +39,10 @@ function CompatibleModelRow({ modelId, fullModel, copied, onCopy, onDeleteAlias,
         <div className="flex items-center gap-1 mt-1 flex-wrap">
           <code className="text-xs text-text-muted font-mono bg-sidebar px-1.5 py-0.5 rounded">{fullModel}</code>
           {activeChips.map((chip) => (
-            <span key={chip.key} className="text-[10px] text-text-muted bg-sidebar px-1.5 py-0.5 rounded">{chip.label}</span>
+            <span key={chip.key} className="relative group/cap inline-flex">
+              <span className="material-symbols-outlined text-sm text-text-muted cursor-help">{chip.icon}</span>
+              <span className="pointer-events-none absolute top-5 left-1/2 -translate-x-1/2 text-[10px] text-text-muted whitespace-nowrap opacity-0 group-hover/cap:opacity-100 transition-opacity bg-sidebar px-1.5 py-0.5 rounded z-10">{chip.label}</span>
+            </span>
           ))}
           {isStt && <span className="text-[10px] text-text-muted bg-sidebar px-1.5 py-0.5 rounded">STT</span>}
           <div className="relative group/btn">

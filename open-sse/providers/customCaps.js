@@ -36,7 +36,12 @@ export function buildCapsLookup(rows, allowedKeys = EDITABLE_CAPS) {
     const id = norm(row?.id);
     const caps = sanitizeCaps(row?.caps, allowedKeys);
     if (!id || !caps) continue;
-    const providers = [norm(row?.providerAlias), norm(row?.providerId)].filter(Boolean);
+    // Index under every known provider key: providerAlias (dashboard storage),
+    // providerId (canonical), and providerName (node display name for
+    // OpenAI-compatible connections). The request-time handler passes the
+    // display name, so without this extra key the lookup never matches.
+    const providers = [norm(row?.providerAlias), norm(row?.providerId), norm(row?.providerName)]
+      .filter(Boolean);
     for (const p of providers) map.set(`${p}|${id}`, caps);
     let providers_seen = idsByProvider.get(id);
     if (!providers_seen) idsByProvider.set(id, (providers_seen = new Set()));
