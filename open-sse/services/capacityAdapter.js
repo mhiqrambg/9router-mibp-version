@@ -84,20 +84,72 @@ function modelSatisfies(modelStr, requiredHard) {
   return requiredHard.every((c) => caps[c] === true);
 }
 
+/** True when this model id reads every requested hard modality. */
+export function satisfiesCapabilities(modelStr, capabilities) {
+  const hard = [...(capabilities || [])].filter((c) => HARD_CAPS.has(c));
+  if (hard.length === 0) return true;
+  return modelSatisfies(modelStr, hard);
+}
+
+/** True when at least one of `models` reads every requested hard modality. */
+export function modelsSatisfyCapabilities(models, capabilities) {
+  return (models || []).some((m) => satisfiesCapabilities(m, capabilities));
+}
+
+/**
+ * Per-combo vision model. A combo may name one model that reads images for it
+ * when none of its own members can — the same delegation the global Vision
+ * Adapter pool does, but scoped to that combo so different combos can use
+ * different readers. Stored as settings.comboStrategies[name].visionModel.
+ * Returns null when unset (fall through to the global pool).
+ */
+export function getComboVisionModel(comboStrategy) {
+  const raw = comboStrategy?.visionModel;
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  return trimmed || null;
+}
+
 // Prepend capacity-adapter models as priority candidates when NONE of the
 // original models (combo members, or the single target model) can satisfy the
 // request's required capabilities. Adapter models go FIRST (priority); the
 // original models follow as fallback. Leaves `models` untouched when the
 // original list already covers it (combo.js's reorderByCapabilities handles
 // that case via autoSwitch).
-export function augmentModelsWithCapacityAdapter(models, requiredCapabilities, settings) {
+//
+// `comboVisionModel` is the per-combo reader (vision only): it is tried before
+// the global pool, so a combo that pins its own vision model never pays a
+// failed round trip on a pool member, and the global pool still backstops it.
+export function augmentModelsWithCapacityAdapter(models, requiredCapabilities, settings, comboVisionModel = null) {
   const hard = [...(requiredCapabilities || [])].filter((c) => HARD_CAPS.has(c));
   if (hard.length === 0 || !Array.isArray(models) || models.length === 0) return models;
   if (models.some((m) => modelSatisfies(m, hard))) return models;
 
-  const pool = getCapacityAdapterModels(settings).filter((m) => !models.includes(m) && modelSatisfies(m, hard));
-  if (pool.length === 0) return models;
-  return [...pool, ...models];
+  const reusable = (m) => !models.includes(m) && modelSatisfies(m, hard);
+  // The combo's own pick is a vision reader; it must not silently become the
+  // pdf/audio adapter, so it only joins a request that actually needs vision.
+  const priority = comboVisionModel && hard.includes("vision") && reusable(comboVisionModel)
+    ? [comboVisionModel]
+    : [];
+
+  const pool = getCapacityAdapterModels(settings).filter(reusable);
+  const merged = [...new Set([...priority, ...pool])];
+  if (merged.length === 0) return models;
+  return [...merged, ...models];
+}
+
+/**
+ * Fusion panels fan out to every member, and members that cannot read the
+ * request's hard modalities get the media stripped — so an image request whose
+ * panel has no reader would be judged on placeholders. Append the combo's own
+ * vision model when it is reachable and the panel needs it. The global adapter
+ * pool is deliberately not pulled in: it would silently grow every fusion panel.
+ */
+export function fusionPanelModels(comboModels, requiredCapabilities, comboVisionModel, reachableModels) {
+  const picksItsReader = comboVisionModel
+    && (reachableModels || []).includes(comboVisionModel)
+    && !modelsSatisfyCapabilities(comboModels, requiredCapabilities);
+  return picksItsReader ? [...comboModels, comboVisionModel] : comboModels;
 }
 
 const CHARS_PER_TOKEN = 4; // rough estimate; avoids pulling in a tokenizer dependency

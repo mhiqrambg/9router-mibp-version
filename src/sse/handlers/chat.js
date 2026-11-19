@@ -17,7 +17,7 @@ import { appendPxpipeEvent } from "@/lib/pxpipe/events.js";
 import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
 import { upstreamResponseHeaders } from "open-sse/utils/upstreamHeaders.js";
 import { handleComboChat, handleFusionChat, detectRequiredCapabilities } from "open-sse/services/combo.js";
-import { augmentModelsWithCapacityAdapter, withCapacityAdapterStripping, getActiveAdapterStrategy } from "open-sse/services/capacityAdapter.js";
+import { augmentModelsWithCapacityAdapter, withCapacityAdapterStripping, getActiveAdapterStrategy, getComboVisionModel, fusionPanelModels } from "open-sse/services/capacityAdapter.js";
 import { handleBypassRequest } from "open-sse/utils/bypassHandler.js";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
 import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
@@ -115,20 +115,29 @@ export async function handleChat(request, clientRawRequest = null) {
   if (comboModels) {
     // Check for combo-specific strategy first, fallback to global
     const comboStrategies = settings.comboStrategies || {};
-    const comboSpecificStrategy = comboStrategies[modelStr]?.fallbackStrategy;
+    const comboCfg = comboStrategies[modelStr] || {};
+    const comboSpecificStrategy = comboCfg.fallbackStrategy;
     const comboStrategy = comboSpecificStrategy || settings.comboStrategy || "fallback";
-    const augmentedModels = await filterAdapterModels(keyAccess, augmentModelsWithCapacityAdapter(comboModels, requiredCapabilities, settings), comboModels);
+    // A combo may pin its own vision reader for image requests its members cannot read.
+    // It is a delegate, not a member: key access checks it like any adapter model.
+    const comboVisionModel = getComboVisionModel(comboCfg);
+    const augmentedModels = await filterAdapterModels(
+      keyAccess,
+      augmentModelsWithCapacityAdapter(comboModels, requiredCapabilities, settings, comboVisionModel),
+      comboModels,
+    );
     const adapterAdded = augmentedModels.filter((m) => !comboModels.includes(m));
 
     if (comboStrategy === "fusion") {
-      log.info("CHAT", `Combo "${modelStr}" with ${comboModels.length} models (strategy: fusion)`);
-      const judgeModel = comboStrategies[modelStr]?.judgeModel;
+      const panelModels = fusionPanelModels(comboModels, requiredCapabilities, comboVisionModel, augmentedModels);
+      log.info("CHAT", `Combo "${modelStr}" with ${panelModels.length} models (strategy: fusion)`);
+      const judgeModel = comboCfg.judgeModel;
       // The judge runs on the client's behalf; a restricted key must not reach
       // a model outside its allow list. Omitting it falls back to panel[0].
       const judgeAllowed = await isModelAllowedForKey(keyAccess, judgeModel);
       return handleFusionChat({
         body,
-        models: comboModels,
+        models: panelModels,
         handleSingleModel: (b, m, isPanel) => {
           let cleanRawReq = clientRawRequest;
           if (isPanel && clientRawRequest) {
@@ -140,12 +149,11 @@ export async function handleChat(request, clientRawRequest = null) {
         log,
         comboName: modelStr,
         judgeModel: judgeAllowed ? judgeModel : undefined,
-        tuning: comboStrategies[modelStr]?.fusionTuning,
+        tuning: comboCfg.fusionTuning,
       });
     }
 
     const comboStickyLimit = settings.comboStickyRoundRobinLimit;
-    const comboCfg = comboStrategies[modelStr] || {};
     const routerModel = comboCfg.routerModel || DEFAULT_SYSTEMONE_ROUTER_MODEL;
     const routerAllowed = await isModelAllowedForKey(keyAccess, routerModel);
     log.info("CHAT", `Combo "${modelStr}" with ${augmentedModels.length} models (strategy: ${comboStrategy}, sticky: ${comboStickyLimit})`);
@@ -210,22 +218,29 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
       const chatSettings = await getSettings();
       // Check for combo-specific strategy first, fallback to global
       const comboStrategies = chatSettings.comboStrategies || {};
-      const comboSpecificStrategy = comboStrategies[modelStr]?.fallbackStrategy;
+      const comboCfg = comboStrategies[modelStr] || {};
+      const comboSpecificStrategy = comboCfg.fallbackStrategy;
       const comboStrategy = comboSpecificStrategy || chatSettings.comboStrategy || "fallback";
       const requiredCapabilities = detectRequiredCapabilities(body);
       // Nested combo (a combo member that is itself a combo): the access decision
       // was made on the outer target; only drop adapter models the key may not call.
       const keyAccess = await getKeyAccessContext(request);
-      const augmentedModels = await filterAdapterModels(keyAccess, augmentModelsWithCapacityAdapter(comboModels, requiredCapabilities, chatSettings), comboModels);
+      const nestedVisionModel = getComboVisionModel(comboCfg);
+      const augmentedModels = await filterAdapterModels(
+        keyAccess,
+        augmentModelsWithCapacityAdapter(comboModels, requiredCapabilities, chatSettings, nestedVisionModel),
+        comboModels,
+      );
       const adapterAdded = augmentedModels.filter((m) => !comboModels.includes(m));
 
       if (comboStrategy === "fusion") {
-        log.info("CHAT", `Combo "${modelStr}" with ${comboModels.length} models (strategy: fusion)`);
-        const judgeModel = comboStrategies[modelStr]?.judgeModel;
+        const panelModels = fusionPanelModels(comboModels, requiredCapabilities, nestedVisionModel, augmentedModels);
+        log.info("CHAT", `Combo "${modelStr}" with ${panelModels.length} models (strategy: fusion)`);
+        const judgeModel = comboCfg.judgeModel;
         const judgeAllowed = await isModelAllowedForKey(keyAccess, judgeModel);
         return handleFusionChat({
           body,
-          models: comboModels,
+          models: panelModels,
           handleSingleModel: (b, m, isPanel) => {
             let cleanRawReq = clientRawRequest;
             if (isPanel && clientRawRequest) {
@@ -237,12 +252,11 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
           log,
           comboName: modelStr,
           judgeModel: judgeAllowed ? judgeModel : undefined,
-          tuning: comboStrategies[modelStr]?.fusionTuning,
+          tuning: comboCfg.fusionTuning,
         });
       }
 
       const comboStickyLimit = chatSettings.comboStickyRoundRobinLimit;
-      const comboCfg = comboStrategies[modelStr] || {};
       const routerModel = comboCfg.routerModel || DEFAULT_SYSTEMONE_ROUTER_MODEL;
       const routerAllowed = await isModelAllowedForKey(keyAccess, routerModel);
       const nestedSession = resolveSessionIdentity({ headers: clientRawRequest?.headers, body });
