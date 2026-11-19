@@ -112,6 +112,18 @@ function redactInlinePayloads(text) {
   return out;
 }
 
+// Text-only models reject ANY inline image payload in string content, not just
+// the long ones the mention pattern leaves alone. A tool result echoing a page's
+// network log carries a ~230-char `data:image/svg+xml;base64,…` icon — long
+// enough to dodge MENTION_DATA_URI's 64-char cutoff, yet still a 400 on lanes
+// like NUTARALINE (`vision_not_supported`). When the model cannot read images,
+// the bytes are unusable there regardless, so redact them all.
+function redactTextOnlyInlineImages(text, isLast, caps) {
+  if (caps?.vision !== false) return text;
+  return text.replace(INLINE_DATA_URI[0].re, (_m, payload) =>
+    `[inline image data URI omitted: ${payload.length} base64 chars]`);
+}
+
 // Mention redaction across request shapes. Runs for every model — before the
 // capability fast-exit in stripUnsupportedModalities: a truncated mention is
 // never a viewable image, and strict upstream lanes 400 on the mere
@@ -119,9 +131,12 @@ function redactInlinePayloads(text) {
 // routing (which scans the pre-strip body) and real image inputs keep working.
 function redactMentionStrings(body, sourceFormat, caps) {
   const dropInline = caps?.dropInlineMediaPayloads === true;
+  let changed = false;
   const scrub = (text, isLast) => {
-    const out = redactEmbeddedDataUris(text, isLast, caps);
-    return dropInline ? redactInlinePayloads(out) : out;
+    const out = redactTextOnlyInlineImages(redactEmbeddedDataUris(text, isLast, caps), isLast, caps);
+    const final = dropInline ? redactInlinePayloads(out) : out;
+    if (final !== text) changed = true;
+    return final;
   };
   const redactMessages = (messages) => {
     if (!Array.isArray(messages)) return;
@@ -146,19 +161,20 @@ function redactMentionStrings(body, sourceFormat, caps) {
     case FORMATS.OPENAI_RESPONSE:
     case FORMATS.CODEX:
       redactParts(body.input, (item) => item?.content?.filter?.((b) => b?.type === "input_text"));
-      return;
+      break;
     case FORMATS.GEMINI:
     case FORMATS.GEMINI_CLI:
     case FORMATS.VERTEX:
       redactParts(body.contents, (c) => c?.parts);
-      return;
+      break;
     case FORMATS.ANTIGRAVITY:
       redactParts(body?.request?.contents, (c) => c?.parts);
-      return;
+      break;
     default:
       redactMessages(body.messages);
       redactParts(body.messages, (msg) => msg?.content?.filter?.((b) => b?.type === "text"));
   }
+  return changed;
 }
 
 // Filter an array of content blocks; drop unsupported, inject one placeholder per kind.
@@ -252,10 +268,10 @@ function stripGeminiParts(contents, caps) {
 export function stripUnsupportedModalities(body, sourceFormat, caps) {
   if (!body || !caps) return false;
   // Mention redaction first (capability-independent); the inline-payload pass
-  // is gated by caps.dropInlineMediaPayloads. Fast exit only skips the
-  // block-level strip.
-  redactMentionStrings(body, sourceFormat, caps);
-  if (caps.vision !== false && caps.audioInput !== false && caps.pdf !== false) return false;
+  // is gated by caps.dropInlineMediaPayloads, and text-only models also lose
+  // every inline image payload. Fast exit only skips the block-level strip.
+  const redactedText = redactMentionStrings(body, sourceFormat, caps);
+  if (caps.vision !== false && caps.audioInput !== false && caps.pdf !== false) return redactedText;
 
   switch (sourceFormat) {
     case FORMATS.OPENAI:

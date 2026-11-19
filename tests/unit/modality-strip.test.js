@@ -191,6 +191,26 @@ describe("stripUnsupportedModalities", () => {
   });
 
 
+  it("openai: text-only model loses a mid-length inline icon in a tool result", () => {
+    // A page network log echoing a 229-char `data:image/svg+xml` icon: past the
+    // mention pattern's 64-char cutoff, so only the vision:false pass catches it.
+    const payload = "PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmci".repeat(4);
+    const text = `reqid=631 GET data:image/svg+xml;base64,${payload} [200]`;
+    const body = { messages: [{ role: "tool", content: text }] };
+    expect(stripUnsupportedModalities(body, FORMATS.OPENAI, { ...ALL, vision: false })).toBe(true);
+    expect(body.messages[0].content).not.toContain("data:image/");
+    expect(body.messages[0].content).toContain("reqid=631 GET");
+    expect(body.messages[0].content).toContain("[200]");
+  });
+
+  it("openai: vision model keeps the same mid-length inline icon", () => {
+    const payload = "PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmci".repeat(4);
+    const text = `reqid=631 GET data:image/svg+xml;base64,${payload} [200]`;
+    const body = { messages: [{ role: "tool", content: text }] };
+    stripUnsupportedModalities(body, FORMATS.OPENAI, ALL);
+    expect(body.messages[0].content).toContain(payload);
+  });
+
   it("handles missing/empty body safely", () => {
     expect(stripUnsupportedModalities(null, FORMATS.OPENAI, NO_VISION)).toBe(false);
     expect(stripUnsupportedModalities({}, FORMATS.OPENAI, null)).toBe(false);
