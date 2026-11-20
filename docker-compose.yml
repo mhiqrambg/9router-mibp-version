@@ -1,10 +1,19 @@
 services:
   9router:
     image: mhiqrambhrng/9router-mibp-version:latest
+    # Build from this checkout so `docker compose up --build` ships the local
+    # source (new fork features included) instead of only the pushed :latest.
+    build:
+      context: .
+      args:
+        APP_VERSION: ${APP_VERSION:-local}
     container_name: 9router
     restart: always
     ports:
-      - "20128:20128"
+      # Loopback only. The dashboard shares this port with the proxy API, so a
+      # bare "20128:20128" publishes the dashboard to the LAN. Set
+      # HOST_BIND=0.0.0.0 only behind an authenticating reverse proxy.
+      - "${HOST_BIND:-127.0.0.1}:20128:20128"
     volumes:
       - 9router-data:/app/data
     env_file:

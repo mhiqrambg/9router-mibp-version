@@ -18,7 +18,7 @@ Run the container:
 mkdir -p 9router-data
 docker run -d \
   --name 9router \
-  -p 20128:20128 \
+  -p 127.0.0.1:20128:20128 \
   -v 9router-data:/app/data \
   -e DATA_DIR=/app/data \
   -e PORT=20128 \
@@ -38,7 +38,9 @@ cp .env.example .env   # fill in JWT_SECRET, INITIAL_PASSWORD, API_KEY_SECRET, M
 docker compose up -d
 ```
 
-Dashboard opens at `http://localhost:20128/dashboard`.
+Dashboard opens at `http://localhost:20128/dashboard`. The container port is
+published to loopback only (`127.0.0.1`); set `HOST_BIND=0.0.0.0` in `.env` only
+behind an authenticating reverse proxy — the dashboard is a full admin surface.
 
 ### Option 2: Manual (from source)
 
@@ -61,7 +63,9 @@ npm run build
 npm run start
 ```
 
-Dashboard opens at `http://localhost:20128/dashboard`.
+Dashboard opens at `http://localhost:20127/dashboard` — `npm run start` and
+`npm run dev` bind loopback only; set `HOSTNAME=0.0.0.0` to serve other
+machines.
 
 ## More Information
 

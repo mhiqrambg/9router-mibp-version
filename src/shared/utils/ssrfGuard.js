@@ -157,6 +157,51 @@ function isBlockedHost(host) {
   return false;
 }
 
+// True when the URL's own host is internal by literal hostname/IP alone. Used by
+// the outbound executor for operator-saved endpoints: a literally-internal host
+// is a deliberate self-hosted gateway, so the DNS/redirect guard is skipped for
+// it — a public hostname that only *resolves* privately is still checked.
+export function isInternalUrl(rawUrl) {
+  try {
+    return isBlockedHost(normalizeHost(new URL(rawUrl).hostname));
+  } catch {
+    return false;
+  }
+}
+
+// Cloud metadata endpoints are never a legitimate provider gateway, so they stay
+// refused even where private targets are allowed (the local dashboard, which
+// self-hosts on loopback/LAN/Tailscale). 169.254/16 covers AWS/GCP/Azure/ECS
+// IMDS; 100.100.100.200 is Alibaba Cloud's. The rest of 100.64/10 is CGNAT and
+// Tailscale's address space — a legitimate gateway — so it stays allowed.
+const METADATA_V4 = [
+  [ipv4ToInt("169.254.0.0"), 16],
+  [ipv4ToInt("100.100.100.200"), 32],
+];
+
+export function assertNotMetadataTarget(rawUrl) {
+  const host = normalizeHost(new URL(rawUrl).hostname).replace(/^\[|\]$/g, "");
+  const checkV4 = (ip) => {
+    for (const [base, bits] of METADATA_V4) {
+      const mask = (0xffffffff << (32 - bits)) >>> 0;
+      if ((ip & mask) === (base & mask)) throw new Error("Blocked URL: cloud metadata endpoint");
+    }
+  };
+
+  const ip = ipv4ToInt(host);
+  if (ip !== null) return checkV4(ip);
+  if (!host.includes(":")) return;
+
+  const groups = parseIPv6ToGroups(host);
+  if (!groups) return;
+  if (groups[0] === 0xfd00 && groups[1] === 0x0ec2 && groups.slice(2, 7).every((x) => x === 0) && groups[7] === 0x0254) {
+    throw new Error("Blocked URL: cloud metadata endpoint");
+  }
+  if ([0, 1, 2, 3, 4].every((i) => groups[i] === 0) && groups[5] === 0xffff) {
+    checkV4(((groups[6] << 16) | groups[7]) >>> 0);
+  }
+}
+
 // Throw if URL targets a non-public host by literal hostname/IP alone (no DNS
 // resolution — see assertPublicUrlResolved for that). Caller should map to 400.
 export function assertPublicUrl(rawUrl) {

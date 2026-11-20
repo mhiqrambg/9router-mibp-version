@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import {
   augmentModelsWithCapacityAdapter,
   getCapacityAdapterModels,
@@ -8,6 +8,7 @@ import {
   satisfiesCapabilities,
   modelsSatisfyCapabilities,
 } from "../../open-sse/services/capacityAdapter.js";
+import { markRouteModelRejectsMedia, resetMediaLaneState } from "../../open-sse/services/mediaLaneSupport.js";
 
 const settings = {
   capacityAdapter: {
@@ -34,6 +35,16 @@ describe("capacity adapter (vision)", () => {
   it("does nothing for text-only requests", () => {
     const models = ["mibp-router/deepseek-v4.1-flash-1017-flex"];
     expect(augmentModelsWithCapacityAdapter(models, [], settings)).toEqual(models);
+  });
+
+  it("leaves an unconfigured pool inert instead of inventing a default model", () => {
+    const unset = { capacityAdapter: { vision: { enabled: true, models: [] } } };
+    const member = "nli/deepseek-v4.1-flash-1017:flex";
+    expect(getCapacityAdapterModels(unset)).toEqual([]);
+    expect(augmentModelsWithCapacityAdapter([member], ["vision"], unset)).toEqual([member]);
+    // A per-combo pin still works without any global pool.
+    expect(augmentModelsWithCapacityAdapter([member], ["vision"], unset, "nli/deepseek-v4.1-flash-1017"))
+      .toEqual(["nli/deepseek-v4.1-flash-1017", member]);
   });
 
   it("reports the pool and strategy it used", () => {
@@ -100,5 +111,30 @@ describe("per-combo vision model", () => {
 
   it("does not seat the pinned reader when key access dropped it", () => {
     expect(fusionPanelModels(flexCombo, ["vision"], "cx/gpt-5.6-terra", flexCombo)).toEqual(flexCombo);
+  });
+});
+
+describe("learned route rejection", () => {
+  beforeEach(() => resetMediaLaneState());
+
+  it("outranks capabilities that claim vision", () => {
+    // A gateway can publish vision:true for a lane that still answers 400 on
+    // image parts (nutaraline `:flex` does exactly that). Once the wire has
+    // taught us the lane is text-only, selection must stop trusting the caps.
+    const member = "nli/deepseek-v4.1-flash-1017";
+    expect(satisfiesCapabilities(member, ["vision"])).toBe(true);
+    markRouteModelRejectsMedia("nli", "deepseek-v4.1-flash-1017");
+    expect(satisfiesCapabilities(member, ["vision"])).toBe(false);
+    // The combo's pinned reader now takes priority over the (now excluded) member.
+    const out = augmentModelsWithCapacityAdapter([member], ["vision"], settings, "cerebras/qwen3-vl-235b-a22b");
+    expect(out[0]).toBe("cerebras/qwen3-vl-235b-a22b");
+    // The member stays last as a fallback, but never ahead of the reader.
+    expect(out[out.length - 1]).toBe(member);
+  });
+
+  it("is scoped to the alias that rejected the media", () => {
+    markRouteModelRejectsMedia("nli", "deepseek-v4.1-flash-1017");
+    expect(satisfiesCapabilities("nli/deepseek-v4.1-flash-1017", ["vision"])).toBe(false);
+    expect(satisfiesCapabilities("openrouter/deepseek-v4.1-flash-1017", ["vision"])).toBe(true);
   });
 });

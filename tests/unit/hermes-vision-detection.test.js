@@ -70,6 +70,20 @@ describe("Hermes Vision Image Detection", () => {
     expect(caps.has("vision")).toBe(true);
   });
 
+  it("does not carry an earlier image into a text-only follow-up turn", () => {
+    const img = { type: "image_url", image_url: { url: "data:image/png;base64,iVBORw0KGgo=" } };
+    const body = {
+      messages: [
+        { role: "user", content: [img, { type: "text", text: "What color?" }] },
+        { role: "assistant", content: "Red" },
+        { role: "user", content: "And the shape?" },
+      ],
+    };
+    // Only the current user turn is scanned; the old image stays in history but
+    // must not force the Vision Adapter on every later turn.
+    expect(detectRequiredCapabilities(body).size).toBe(0);
+  });
+
   it("auto-switches non-vision model (deepseek-v4-pro) to Vision Adapter model (Kimi-K3)", () => {
     const body = {
       messages: [

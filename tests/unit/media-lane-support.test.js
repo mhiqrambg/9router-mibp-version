@@ -2,6 +2,8 @@ import { describe, it, expect, beforeEach } from "vitest";
 import {
   laneRejectsMedia,
   markLaneRejectsMedia,
+  markRouteModelRejectsMedia,
+  routeModelRejectsMedia,
   textOnlyCaps,
   resetMediaLaneState,
 } from "../../open-sse/services/mediaLaneSupport.js";
@@ -28,6 +30,19 @@ describe("media lane support registry", () => {
     expect(laneRejectsMedia("runcrate", "conn1", "m", now + 7 * 60 * 60 * 1000)).toBe(false);
     // expired marks are dropped, not carried forward
     expect(laneRejectsMedia("runcrate", "conn1", "m", now + 7 * 60 * 60 * 1000)).toBe(false);
+  });
+
+  it("remembers the lesson per route alias for model selection", () => {
+    const now = Date.now();
+    markRouteModelRejectsMedia("nli", "deepseek-v4.1-flash-1017:flex", now);
+    expect(routeModelRejectsMedia("nli", "deepseek-v4.1-flash-1017:flex", now + 60_000)).toBe(true);
+    // Another gateway serves the same model id: its own lesson is separate.
+    expect(routeModelRejectsMedia("runcrate", "deepseek-v4.1-flash-1017:flex", now + 60_000)).toBe(false);
+    expect(routeModelRejectsMedia("nli", "other-model", now + 60_000)).toBe(false);
+    expect(routeModelRejectsMedia("nli", "deepseek-v4.1-flash-1017:flex", now + 7 * 60 * 60 * 1000)).toBe(false);
+    // Clearing on reset keeps one suite's lesson out of the next.
+    resetMediaLaneState();
+    expect(routeModelRejectsMedia("nli", "deepseek-v4.1-flash-1017:flex", now + 60_000)).toBe(false);
   });
 
   it("textOnlyCaps clears media capabilities only", () => {

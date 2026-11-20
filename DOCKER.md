@@ -10,7 +10,7 @@ Run 9Router in a container. Published image: [`decolua/9router`](https://hub.doc
 
 ```bash
 docker run -d \
-  -p 20128:20128 \
+  -p 127.0.0.1:20128:20128 \
   -v "$HOME/.9router:/app/data" \
   -e DATA_DIR=/app/data \
   --name 9router \
@@ -18,6 +18,11 @@ docker run -d \
 ```
 
 App listens on port `20128`. Open: http://localhost:20128
+
+The dashboard shares this port with the proxy API and is a full admin surface,
+so publish it to loopback (`-p 127.0.0.1:20128:20128`) unless an authenticating
+reverse proxy fronts it. A bare `-p 20128:20128` exposes the dashboard to every
+interface.
 
 ## Manage container
 
@@ -54,7 +59,7 @@ Container path: `/app/data/db/data.sqlite`
 
 ```bash
 docker run -d \
-  -p 20128:20128 \
+  -p 127.0.0.1:20128:20128 \
   -v "$HOME/.9router:/app/data" \
   -e DATA_DIR=/app/data \
   -e PORT=20128 \
@@ -73,7 +78,7 @@ services:
   9router:
     image: decolua/9router:latest
     ports:
-      - "20128:20128"
+      - "127.0.0.1:20128:20128"
     volumes:
       - "$HOME/.9router:/app/data"
     environment:
@@ -115,7 +120,7 @@ docker pull decolua/9router:0.5.81
 ```bash
 docker build -t 9router .
 
-docker run --rm -p 20128:20128 \
+docker run --rm -p 127.0.0.1:20128:20128 \
   -v "$HOME/.9router:/app/data" \
   -e DATA_DIR=/app/data \
   9router

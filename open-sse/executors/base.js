@@ -4,6 +4,10 @@ import { proxyAwareFetch } from "../utils/proxyFetch.js";
 import { dbg } from "../utils/debugLog.js";
 import { ANTHROPIC_API_VERSION, OPENAI_COMPAT_BASE, ANTHROPIC_COMPAT_BASE } from "../providers/shared.js";
 import { resolveOpenAICompatibleApiType } from "../services/provider.js";
+import { assertNotMetadataTarget, assertPublicUrlResolved, isInternalUrl } from "../../src/shared/utils/ssrfGuard.js";
+
+// Provider ids whose base URL comes from the dashboard rather than the registry.
+const USER_SUPPLIED_ENDPOINT = /^(openai-compatible|anthropic-compatible|custom-embedding)/;
 
 /**
  * BaseExecutor - Base class for provider executors
@@ -126,6 +130,30 @@ export class BaseExecutor {
 
     for (let urlIndex = 0; urlIndex < fallbackCount; urlIndex++) {
       const url = this.buildUrl(model, stream, urlIndex, credentials);
+
+      // A dashboard-saved endpoint is re-checked here, not only on save: cloud
+      // metadata stays refused, and a public hostname that now resolves to a
+      // private address (DNS rebinding, nip.io/sslip.io) is rejected. A
+      // literally-internal host is the operator's own self-hosted gateway and
+      // passes — that is the one case the guard cannot learn from the URL.
+      if (USER_SUPPLIED_ENDPOINT.test(this.provider || "")) {
+        try {
+          assertNotMetadataTarget(url);
+          if (!isInternalUrl(url)) await assertPublicUrlResolved(url);
+        } catch (error) {
+          log?.error?.("URL", `${this.provider}: ${error.message}`);
+          return {
+            response: new Response(JSON.stringify({ error: { message: error.message, type: "invalid_request_error" } }), {
+              status: HTTP_STATUS.BAD_REQUEST,
+              headers: { "Content-Type": "application/json" },
+            }),
+            url,
+            headers: {},
+            transformedBody: body,
+          };
+        }
+      }
+
       const transformedBody = this.transformRequest(model, body, stream, credentials);
       const headers = this.buildHeaders(credentials, stream, url, model, transformedBody);
       // User per-provider override wins over registry headers (blocked names filtered at the API)

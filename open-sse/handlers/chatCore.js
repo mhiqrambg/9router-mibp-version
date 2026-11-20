@@ -34,7 +34,7 @@ import { prefetchRemoteImages } from "../translator/concerns/prefetch.js";
 import { defaultClaudeToolType, shouldDefaultClaudeToolType } from "../translator/concerns/toolCall.js";
 import { resolveSessionId } from "../utils/sessionManager.js";
 import { markPoolUnfit, clearPoolUnfit } from "../services/proxyPoolFitness.js";
-import { laneRejectsMedia, markLaneRejectsMedia, textOnlyCaps } from "../services/mediaLaneSupport.js";
+import { laneRejectsMedia, markLaneRejectsMedia, markRouteModelRejectsMedia, textOnlyCaps } from "../services/mediaLaneSupport.js";
 
 // Pool-scoped failure retry: when an executor tags an error as belonging to a
 // proxy pool (region gate, dead proxy, …), re-resolve the proxy config
@@ -195,7 +195,12 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     // for the failed round trip on every request.
     const laneTextOnly = laneRejectsMedia(provider, connectionId, model);
     const caps = laneTextOnly ? textOnlyCaps(modelCaps) : modelCaps;
-    if (laneTextOnly) log?.debug?.("MODALITY", `lane ${provider}/${model} rejects media — stripping up front`);
+    if (laneTextOnly) {
+      // Teach model selection the same lesson, keyed by the route alias, so the
+      // next image request seats the combo's vision reader instead of stripping.
+      markRouteModelRejectsMedia(credentials?.providerSpecificData?.prefix, model);
+      log?.debug?.("MODALITY", `lane ${provider}/${model} rejects media — stripping up front`);
+    }
     if (stripUnsupportedModalities(body, sourceFormat, caps)) {
       log?.debug?.("MODALITY", `stripped unsupported media for ${provider}/${model}`);
     }
@@ -528,7 +533,12 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
       log?.warn?.("MODALITY", `${provider}/${model} rejected a media-carrying request — retrying without media parts`);
       parsedNonOk = null; // the retry's own error must be the one reported
       applyResult(await executeWithPoolFallback());
-      if (providerResponse.ok) markLaneRejectsMedia(provider, connectionId, model);
+      if (providerResponse.ok) {
+        markLaneRejectsMedia(provider, connectionId, model);
+        // Same lesson for model selection: route the next image request to the
+        // combo's pinned reader instead of stripping the image silently.
+        markRouteModelRejectsMedia(credentials?.providerSpecificData?.prefix, model);
+      }
     }
   }
 

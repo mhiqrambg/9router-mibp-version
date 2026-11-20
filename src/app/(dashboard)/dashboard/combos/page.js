@@ -24,7 +24,6 @@ const CAPACITY_ADAPTER_CAPS = [
   // pdf, videoInput temporarily hidden — no translator support yet for those blocks.
   { key: "audioInput", label: "Audio", icon: "graphic_eq", desc: "audio input" },
 ];
-const DEFAULT_FALLBACK_MODEL = "oc/mimo-v2.6-flash-free";
 const EMPTY_CAP_ENTRY = { enabled: true, roundRobin: false, models: [] };
 const EMPTY_CAPACITY_ADAPTER = {
   vision: { ...EMPTY_CAP_ENTRY },
@@ -32,7 +31,7 @@ const EMPTY_CAPACITY_ADAPTER = {
   audioInput: { ...EMPTY_CAP_ENTRY },
   videoInput: { ...EMPTY_CAP_ENTRY },
 };
-const upgradeLegacyModel = (m) => (m === "oc/mimo-v2.5-free" ? DEFAULT_FALLBACK_MODEL : m);
+const upgradeLegacyModel = (m) => (m === "oc/mimo-v2.5-free" ? "oc/mimo-v2.6-flash-free" : m);
 
 // Backward-compat: legacy stored form was an array of {model, enabled}.
 function normalizeCapEntry(entry) {
@@ -985,13 +984,11 @@ function CapacityAdapterCap({ cap, entry, onChange, activeProviders, getCaps }) 
 
   const handleDeselect = (model) => {
     const value = model?.value || model?.name || model;
-    const next = models.filter((m) => m !== value);
-    patch({ models: next.length === 0 ? [DEFAULT_FALLBACK_MODEL] : next });
+    patch({ models: models.filter((m) => m !== value) });
   };
 
   const handleRemove = (index) => {
-    const next = models.filter((_, i) => i !== index);
-    patch({ models: next.length === 0 ? [DEFAULT_FALLBACK_MODEL] : next });
+    patch({ models: models.filter((_, i) => i !== index) });
   };
 
   const handleMove = (index, delta) => {
@@ -1050,7 +1047,7 @@ function CapacityAdapterCap({ cap, entry, onChange, activeProviders, getCaps }) 
       {/* Model pool list/table */}
       {models.length === 0 ? (
         <div className="mt-3 py-2 text-center text-xs text-text-muted italic">
-          No models in pool (will fallback to {DEFAULT_FALLBACK_MODEL})
+          No models in pool — the global adapter stays inactive until you add one.
         </div>
       ) : (
         <div className="mt-3 overflow-hidden rounded-lg border border-border/50">
@@ -1073,11 +1070,6 @@ function CapacityAdapterCap({ cap, entry, onChange, activeProviders, getCaps }) 
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <span className="truncate">{model}</span>
                       <CapacityBadges caps={getCaps?.(model)} />
-                      {model === DEFAULT_FALLBACK_MODEL && (
-                        <span className="rounded bg-emerald-500/10 px-1.5 py-0.5 font-sans text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
-                          free default
-                        </span>
-                      )}
                     </div>
                   </td>
                   <td className="px-3 py-2 text-center">

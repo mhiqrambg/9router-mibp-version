@@ -98,7 +98,7 @@ const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 // Accepts a Host header, a URL hostname or a raw socket address. Splitting on the first
 // colon only works for IPv4 and would reduce every IPv6 form to "", so a dual-stack
 // listener handing back ::ffff:127.0.0.1 would not read as loopback.
-function isLoopbackHostname(h) {
+export function isLoopbackHostname(h) {
   if (!h) return false;
   let name = String(h).trim().toLowerCase();
   if (name.startsWith("[")) {
@@ -136,6 +136,16 @@ export function isLocalRequest(request) {
     } catch { return false; }
   }
   return true;
+}
+
+// Can this dashboard caller point a custom provider at a private target
+// (loopback/LAN self-hosted gateway)? A container sees the host's browser as
+// the Docker bridge peer, so isLocalRequest() is false even when the container
+// port is published to 127.0.0.1 — the Host header is the address actually
+// typed, so a loopback Host counts as local too. A remote dashboard (LAN IP,
+// reverse-proxy domain) does not, and keeps the public-only rule.
+export function allowsPrivateEndpoint(request) {
+  return isLocalRequest(request) || isLoopbackHostname(request.headers.get("host"));
 }
 
 function isPublicLlmApi(pathname) {

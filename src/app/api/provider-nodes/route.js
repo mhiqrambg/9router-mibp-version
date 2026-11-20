@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { createProviderNode, getProviderNodes } from "@/models";
 import { OPENAI_COMPATIBLE_PREFIX, ANTHROPIC_COMPATIBLE_PREFIX, CUSTOM_EMBEDDING_PREFIX } from "@/shared/constants/providers";
 import { generateId } from "@/shared/utils";
+import { normalizeOpenAICompatibleBaseUrl } from "@/shared/utils/baseUrl";
+import { checkEndpointUrl } from "@/shared/utils/endpointUrl.js";
+import { allowsPrivateEndpoint } from "@/dashboardGuard";
 
 export const dynamic = "force-dynamic";
 
@@ -50,12 +53,18 @@ export async function POST(request) {
         return NextResponse.json({ error: "Invalid OpenAI compatible API type" }, { status: 400 });
       }
 
+      const normalizedBaseUrl = normalizeOpenAICompatibleBaseUrl(baseUrl || OPENAI_COMPATIBLE_DEFAULTS.baseUrl);
+      const urlCheck = checkEndpointUrl(normalizedBaseUrl, { allowPrivate: allowsPrivateEndpoint(request) });
+      if (!urlCheck.ok) {
+        return NextResponse.json({ error: urlCheck.error }, { status: 400 });
+      }
+
       const node = await createProviderNode({
         id: `${OPENAI_COMPATIBLE_PREFIX}${apiType}-${generateId()}`,
         type: "openai-compatible",
         prefix: prefix.trim(),
         apiType,
-        baseUrl: (baseUrl || OPENAI_COMPATIBLE_DEFAULTS.baseUrl).trim(),
+        baseUrl: normalizedBaseUrl,
         name: name.trim(),
       });
       return NextResponse.json({ node }, { status: 201 });
@@ -66,6 +75,11 @@ export async function POST(request) {
       let sanitizedBaseUrl = (baseUrl || CUSTOM_EMBEDDING_DEFAULTS.baseUrl).trim().replace(/\/$/, "");
       if (sanitizedBaseUrl.endsWith("/embeddings")) {
         sanitizedBaseUrl = sanitizedBaseUrl.slice(0, -"/embeddings".length);
+      }
+
+      const urlCheck = checkEndpointUrl(sanitizedBaseUrl, { allowPrivate: allowsPrivateEndpoint(request) });
+      if (!urlCheck.ok) {
+        return NextResponse.json({ error: urlCheck.error }, { status: 400 });
       }
 
       const node = await createProviderNode({
@@ -84,6 +98,11 @@ export async function POST(request) {
       let sanitizedBaseUrl = (baseUrl || ANTHROPIC_COMPATIBLE_DEFAULTS.baseUrl).trim().replace(/\/$/, "");
       if (sanitizedBaseUrl.endsWith("/messages")) {
         sanitizedBaseUrl = sanitizedBaseUrl.slice(0, -9); // remove /messages
+      }
+
+      const urlCheck = checkEndpointUrl(sanitizedBaseUrl, { allowPrivate: allowsPrivateEndpoint(request) });
+      if (!urlCheck.ok) {
+        return NextResponse.json({ error: urlCheck.error }, { status: 400 });
       }
 
       const node = await createProviderNode({

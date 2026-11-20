@@ -13,6 +13,13 @@ const origCreate = http.createServer.bind(http);
 const PEER_TOKEN = crypto.randomBytes(24).toString("hex");
 process.env.NINEROUTER_PEER_TOKEN = PEER_TOKEN;
 
+// The dashboard shares this port with the proxy API, and `next start` listens on
+// every interface when no host is given. Bind loopback unless HOSTNAME says
+// otherwise: the Dockerfile sets 0.0.0.0 for the container's own interface, and
+// docker-compose.yml publishes only 127.0.0.1. (The standalone server reads
+// HOSTNAME itself; only `next start` needs the flag passed below.)
+const LISTEN_HOST = process.env.HOSTNAME || "127.0.0.1";
+
 let backgroundRefreshStarted = false;
 
 function startBackgroundTokenRefreshFromCustomServer() {
@@ -134,6 +141,11 @@ if (require.main === module) {
     // server in-process, so the wrapper above still sanitizes every request.
     const nextBin = require.resolve("next/dist/bin/next");
     process.argv = [process.argv[0], nextBin, "start", ...process.argv.slice(2)];
+    // `next start` ignores HOSTNAME, so pass the resolved host explicitly unless the
+    // caller already chose one.
+    if (!process.argv.some((a) => a === "--hostname" || a === "-H" || a.startsWith("--hostname="))) {
+      process.argv.push("--hostname", LISTEN_HOST);
+    }
     require(nextBin);
   }
 }

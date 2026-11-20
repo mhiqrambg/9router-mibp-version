@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
 import { deleteProviderConnectionsByProvider, deleteProviderNode, getProviderConnections, getProviderNodeById, updateProviderConnection, updateProviderNode } from "@/models";
+import { normalizeOpenAICompatibleBaseUrl } from "@/shared/utils/baseUrl";
+import { checkEndpointUrl } from "@/shared/utils/endpointUrl.js";
+import { allowsPrivateEndpoint } from "@/dashboardGuard";
 
 // PUT /api/provider-nodes/[id] - Update provider node
 export async function PUT(request, { params }) {
@@ -31,7 +34,14 @@ export async function PUT(request, { params }) {
     }
 
     let sanitizedBaseUrl = baseUrl.trim();
-    
+
+    // OpenAI Compatible: the base URL is the API root; the runtime appends
+    // /chat/completions or /responses. Strip a pasted endpoint so it can't
+    // double-append into a 404.
+    if (node.type === "openai-compatible") {
+      sanitizedBaseUrl = normalizeOpenAICompatibleBaseUrl(sanitizedBaseUrl);
+    }
+
     // Sanitize Base URL for Anthropic Compatible
     if (node.type === "anthropic-compatible") {
       sanitizedBaseUrl = sanitizedBaseUrl.replace(/\/$/, "");
@@ -46,6 +56,11 @@ export async function PUT(request, { params }) {
       if (sanitizedBaseUrl.endsWith("/embeddings")) {
         sanitizedBaseUrl = sanitizedBaseUrl.slice(0, -"/embeddings".length);
       }
+    }
+
+    const urlCheck = checkEndpointUrl(sanitizedBaseUrl, { allowPrivate: allowsPrivateEndpoint(request) });
+    if (!urlCheck.ok) {
+      return NextResponse.json({ error: urlCheck.error }, { status: 400 });
     }
 
     const updates = {

@@ -83,8 +83,13 @@ COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/custom-server.js ./custom-server.js
 COPY --from=builder /app/open-sse ./open-sse
-# Next file tracing can omit sibling files; MITM runs server.js as a separate process.
-COPY --from=builder /app/src/mitm ./src/mitm
+# Next file tracing follows webpack bundles, not the on-disk imports of modules the
+# standalone loads by path at runtime (custom-server's background token refresh, the
+# MITM child process, traced services). Ship the full source tree so those relative
+# imports resolve — a partial trace left chains like executors/base.js →
+# services/tokenRefresh/providers.js → src/lib/oauth/kiroExternalIdp.js broken with
+# ERR_MODULE_NOT_FOUND.
+COPY --from=builder /app/src ./src
 # Standalone node_modules may omit deps only required by the MITM child process.
 COPY --from=builder /app/node_modules/node-forge ./node_modules/node-forge
 # Ensure `next` is available at runtime in case tracing did not include it.
@@ -97,6 +102,11 @@ COPY --from=builder /app/node_modules/node-machine-id ./node_modules/node-machin
 # wreq-js + playwright-core (and deps) are lazy-loaded at runtime and omitted by
 # tracing. See https://github.com/decolua/9router/issues/5245
 COPY --from=builder /opt/lazy-runtime/node_modules/. ./node_modules/
+
+# jsconfig maps the bare `open-sse/*` specifier to ./open-sse for webpack; modules
+# loaded from disk at runtime resolve through node_modules instead, so expose it
+# there too (background token refresh imports open-sse/services/tokenRefresh.js).
+RUN ln -s /app/open-sse /app/node_modules/open-sse
 
 RUN mkdir -p /app/data && chown -R node:node /app && \
   mkdir -p /app/data-home && chown node:node /app/data-home && \
