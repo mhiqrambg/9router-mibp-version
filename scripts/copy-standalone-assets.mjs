@@ -37,6 +37,15 @@ export function copyStandaloneAssets({ projectRoot = process.cwd(), distDir = pr
     cpSync(serverWrapperSource, serverWrapperDestination, { force: true });
     console.log(`[standalone-assets] Copied custom-server.js to ${serverWrapperDestination}`);
   }
+
+  // Resolve hooks custom-server.js registers before importing src/ modules from
+  // disk (jsconfig aliases: @/* and open-sse/*).
+  const hooksSource = resolve(projectRoot, "custom-server-hooks.mjs");
+  const hooksDestination = resolve(standaloneDir, "custom-server-hooks.mjs");
+  if (existsSync(hooksSource)) {
+    cpSync(hooksSource, hooksDestination, { force: true });
+    console.log(`[standalone-assets] Copied custom-server-hooks.mjs to ${hooksDestination}`);
+  }
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === resolve(dirname(fileURLToPath(import.meta.url)), "copy-standalone-assets.mjs")) {

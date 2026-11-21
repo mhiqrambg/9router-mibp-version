@@ -3,6 +3,7 @@ const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
 const { pathToFileURL } = require("url");
+const { register } = require("node:module");
 
 const origCreate = http.createServer.bind(http);
 
@@ -25,6 +26,15 @@ let backgroundRefreshStarted = false;
 function startBackgroundTokenRefreshFromCustomServer() {
   if (backgroundRefreshStarted) return;
   backgroundRefreshStarted = true;
+  // src/ modules import through the jsconfig aliases (@/..., open-sse/...), which
+  // webpack resolved at build time but Node cannot. Register the matching resolve
+  // hooks before the first on-disk import. Fail-open: without them the import
+  // rejects and the app bootstrap still starts the same scheduler.
+  try {
+    register(pathToFileURL(path.join(__dirname, "custom-server-hooks.mjs")).href);
+  } catch (e) {
+    console.error("[BackgroundTokenRefresh] alias hooks failed:", e && e.message ? e.message : e);
+  }
   // Prefer source path (repo / standalone that still has src). Fail-open if missing
   // — initializeApp also starts the same scheduler when the Next app boots.
   const modPath = path.join(__dirname, "src", "sse", "services", "backgroundTokenRefresh.js");
